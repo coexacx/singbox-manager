@@ -1,0 +1,8 @@
+{
+  "protocol": "shadowsocks",
+  "server": "REPLACE_ME_SERVER_HOST_OR_IP",
+  "server_port": 8388,
+  "method": "chacha20-ietf-poly1305",
+  "password": "REPLACE_ME_PASSWORD",
+  "direct_dns": "1.1.1.1"
+}

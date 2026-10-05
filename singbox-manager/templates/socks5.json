@@ -1,0 +1,1838 @@
+{
+  "outbounds": [
+    {
+      "type": "socks",
+      "tag": "socks5-out",
+      "server": "REPLACE_ME_SOCKS5_HOST_OR_IP",
+      "server_port": 1080,
+      "version": "5",
+      "network": "tcp"
+    }
+  ],
+  "route": {
+    "rules": [
+      {
+        "inbound": [
+          "anytls-in"
+        ],
+        "action": "sniff",
+        "sniffer": [
+          "http",
+          "tls",
+          "quic"
+        ],
+        "timeout": "300ms"
+      },
+      {
+        "inbound": [
+          "anytls-in"
+        ],
+        "network": "udp",
+        "rule_set": [
+          "netflix",
+          "disney",
+          "primevideo",
+          "hbo",
+          "apple-tvplus",
+          "youtube",
+          "twitch",
+          "tiktok",
+          "vimeo",
+          "dailymotion",
+          "plex",
+          "roku",
+          "crunchyroll",
+          "curiositystream",
+          "spotify",
+          "apple-music",
+          "deezer",
+          "tidal",
+          "soundcloud",
+          "kkbox",
+          "pandora",
+          "qobuz",
+          "joox",
+          "moov",
+          "mytvsuper",
+          "tvb",
+          "now",
+          "cabletv",
+          "viutv",
+          "rthk",
+          "nowe",
+          "hk-open-tv",
+          "bahamut",
+          "kktv",
+          "hamivideo",
+          "litv",
+          "catchplay",
+          "linetv",
+          "friday",
+          "taiwan-good",
+          "vidol",
+          "abema",
+          "tver",
+          "niconico",
+          "unext",
+          "nhk",
+          "radiko",
+          "hulu-jp",
+          "wowow",
+          "lemino",
+          "tving",
+          "wavve",
+          "watcha",
+          "coupang-play",
+          "naver-tv",
+          "viki",
+          "viu",
+          "wetv",
+          "iqiyi-intl",
+          "bilibili-intl",
+          "mewatch",
+          "vidio",
+          "hulu-us",
+          "plutotv",
+          "tubi",
+          "discoveryplus",
+          "cbs",
+          "pbs",
+          "paramount-plus",
+          "peacock",
+          "nbc",
+          "fubo",
+          "sling",
+          "the-cw",
+          "dazn",
+          "espn",
+          "bbc",
+          "itv",
+          "channel4",
+          "channel5",
+          "sky-go",
+          "arte",
+          "france-tv",
+          "tf1",
+          "m6",
+          "canalplus",
+          "molotov",
+          "ard",
+          "zdf",
+          "joyn",
+          "rtlplus",
+          "raiplay",
+          "mediaset",
+          "atresplayer",
+          "movistarplus",
+          "npo",
+          "stan",
+          "binge",
+          "kayo",
+          "7plus",
+          "9now",
+          "sbs-on-demand",
+          "abc-iview",
+          "tvnz",
+          "crave",
+          "cbc-gem",
+          "ctv",
+          "hotstar",
+          "zee5",
+          "sonyliv",
+          "shahid",
+          "osnplus",
+          "starzplay",
+          "tod",
+          "globo",
+          "vix",
+          "clarovideo",
+          "openai",
+          "anthropic",
+          "google-gemini",
+          "perplexity",
+          "xai",
+          "ip-detect",
+          "google",
+          "service-extra",
+          "instagram",
+          "facebook",
+          "bandcamp",
+          "apple-podcasts",
+          "audio-extra"
+        ],
+        "action": "reject",
+        "method": "default"
+      },
+      {
+        "inbound": [
+          "anytls-in"
+        ],
+        "rule_set": [
+          "netflix",
+          "disney",
+          "primevideo",
+          "hbo",
+          "apple-tvplus",
+          "youtube",
+          "twitch",
+          "tiktok",
+          "vimeo",
+          "dailymotion",
+          "plex",
+          "roku",
+          "crunchyroll",
+          "curiositystream",
+          "spotify",
+          "apple-music",
+          "deezer",
+          "tidal",
+          "soundcloud",
+          "kkbox",
+          "pandora",
+          "qobuz",
+          "joox",
+          "moov",
+          "mytvsuper",
+          "tvb",
+          "now",
+          "cabletv",
+          "viutv",
+          "rthk",
+          "nowe",
+          "hk-open-tv",
+          "bahamut",
+          "kktv",
+          "hamivideo",
+          "litv",
+          "catchplay",
+          "linetv",
+          "friday",
+          "taiwan-good",
+          "vidol",
+          "abema",
+          "tver",
+          "niconico",
+          "unext",
+          "nhk",
+          "radiko",
+          "hulu-jp",
+          "wowow",
+          "lemino",
+          "tving",
+          "wavve",
+          "watcha",
+          "coupang-play",
+          "naver-tv",
+          "viki",
+          "viu",
+          "wetv",
+          "iqiyi-intl",
+          "bilibili-intl",
+          "mewatch",
+          "vidio",
+          "hulu-us",
+          "plutotv",
+          "tubi",
+          "discoveryplus",
+          "cbs",
+          "pbs",
+          "paramount-plus",
+          "peacock",
+          "nbc",
+          "fubo",
+          "sling",
+          "the-cw",
+          "dazn",
+          "espn",
+          "bbc",
+          "itv",
+          "channel4",
+          "channel5",
+          "sky-go",
+          "arte",
+          "france-tv",
+          "tf1",
+          "m6",
+          "canalplus",
+          "molotov",
+          "ard",
+          "zdf",
+          "joyn",
+          "rtlplus",
+          "raiplay",
+          "mediaset",
+          "atresplayer",
+          "movistarplus",
+          "npo",
+          "stan",
+          "binge",
+          "kayo",
+          "7plus",
+          "9now",
+          "sbs-on-demand",
+          "abc-iview",
+          "tvnz",
+          "crave",
+          "cbc-gem",
+          "ctv",
+          "hotstar",
+          "zee5",
+          "sonyliv",
+          "shahid",
+          "osnplus",
+          "starzplay",
+          "tod",
+          "globo",
+          "vix",
+          "clarovideo",
+          "openai",
+          "anthropic",
+          "google-gemini",
+          "perplexity",
+          "xai",
+          "ip-detect",
+          "google",
+          "service-extra",
+          "instagram",
+          "facebook",
+          "bandcamp",
+          "apple-podcasts",
+          "audio-extra"
+        ],
+        "action": "route",
+        "outbound": "socks5-out"
+      }
+    ],
+    "rule_set": [
+      {
+        "type": "remote",
+        "tag": "netflix",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-netflix.srs",
+        "download_detour": "direct",
+        "update_interval": "1d"
+      },
+      {
+        "type": "remote",
+        "tag": "disney",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-disney.srs",
+        "download_detour": "direct",
+        "update_interval": "1d"
+      },
+      {
+        "type": "remote",
+        "tag": "primevideo",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-primevideo.srs",
+        "download_detour": "direct",
+        "update_interval": "1d"
+      },
+      {
+        "type": "remote",
+        "tag": "hbo",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-hbo.srs",
+        "download_detour": "direct",
+        "update_interval": "1d"
+      },
+      {
+        "type": "remote",
+        "tag": "apple-tvplus",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-apple-tvplus.srs",
+        "download_detour": "direct",
+        "update_interval": "1d"
+      },
+      {
+        "type": "remote",
+        "tag": "youtube",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-youtube.srs",
+        "download_detour": "direct",
+        "update_interval": "1d"
+      },
+      {
+        "type": "remote",
+        "tag": "twitch",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-twitch.srs",
+        "download_detour": "direct",
+        "update_interval": "1d"
+      },
+      {
+        "type": "remote",
+        "tag": "tiktok",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-tiktok.srs",
+        "download_detour": "direct",
+        "update_interval": "1d"
+      },
+      {
+        "type": "remote",
+        "tag": "vimeo",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-vimeo.srs",
+        "download_detour": "direct",
+        "update_interval": "1d"
+      },
+      {
+        "type": "remote",
+        "tag": "dailymotion",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-dailymotion.srs",
+        "download_detour": "direct",
+        "update_interval": "1d"
+      },
+      {
+        "type": "remote",
+        "tag": "plex",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-plex.srs",
+        "download_detour": "direct",
+        "update_interval": "1d"
+      },
+      {
+        "type": "remote",
+        "tag": "roku",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-roku.srs",
+        "download_detour": "direct",
+        "update_interval": "1d"
+      },
+      {
+        "type": "inline",
+        "tag": "crunchyroll",
+        "rules": [
+          {
+            "domain_suffix": [
+              "crunchyroll.com"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "curiositystream",
+        "rules": [
+          {
+            "domain_suffix": [
+              "curiositystream.com"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "remote",
+        "tag": "spotify",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-spotify.srs",
+        "download_detour": "direct",
+        "update_interval": "1d"
+      },
+      {
+        "type": "remote",
+        "tag": "apple-music",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-apple-music.srs",
+        "download_detour": "direct",
+        "update_interval": "1d"
+      },
+      {
+        "type": "remote",
+        "tag": "deezer",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-deezer.srs",
+        "download_detour": "direct",
+        "update_interval": "1d"
+      },
+      {
+        "type": "remote",
+        "tag": "tidal",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-tidal.srs",
+        "download_detour": "direct",
+        "update_interval": "1d"
+      },
+      {
+        "type": "remote",
+        "tag": "soundcloud",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-soundcloud.srs",
+        "download_detour": "direct",
+        "update_interval": "1d"
+      },
+      {
+        "type": "remote",
+        "tag": "kkbox",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-kkbox.srs",
+        "download_detour": "direct",
+        "update_interval": "1d"
+      },
+      {
+        "type": "inline",
+        "tag": "pandora",
+        "rules": [
+          {
+            "domain_suffix": [
+              "p-cdn.us",
+              "pandora.com"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "qobuz",
+        "rules": [
+          {
+            "domain_suffix": [
+              "cobeuz.fr",
+              "cobuz.fr",
+              "cobuzz.fr",
+              "kobuz.fr",
+              "qobuz.at",
+              "qobuz.be",
+              "qobuz.biz",
+              "qobuz.ca",
+              "qobuz.ch",
+              "qobuz.co.uk",
+              "qobuz.com",
+              "qobuz.de",
+              "qobuz.eu",
+              "qobuz.fi",
+              "qobuz.fr",
+              "qobuz.gr",
+              "qobuz.hk",
+              "qobuz.info",
+              "qobuz.it",
+              "qobuz.lt",
+              "qobuz.lu",
+              "qobuz.net",
+              "qobuz.org",
+              "qobuz.pl",
+              "qobuz.ro",
+              "qobuz.se",
+              "qobuz.tv",
+              "qobuz.us",
+              "quobuz.com",
+              "quobuz.fr",
+              "static-qobuz.com"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "joox",
+        "rules": [
+          {
+            "domain_suffix": [
+              "i-joox.com",
+              "joox.com",
+              "sanook.com"
+            ],
+            "domain_keyword": [
+              "jooxweb-api"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "moov",
+        "rules": [
+          {
+            "domain_suffix": [
+              "moov.hk",
+              "mtg.now.com"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "remote",
+        "tag": "mytvsuper",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-mytvsuper.srs",
+        "download_detour": "direct",
+        "update_interval": "1d"
+      },
+      {
+        "type": "remote",
+        "tag": "tvb",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-tvb.srs",
+        "download_detour": "direct",
+        "update_interval": "1d"
+      },
+      {
+        "type": "remote",
+        "tag": "now",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-now.srs",
+        "download_detour": "direct",
+        "update_interval": "1d"
+      },
+      {
+        "type": "remote",
+        "tag": "cabletv",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-cabletv.srs",
+        "download_detour": "direct",
+        "update_interval": "1d"
+      },
+      {
+        "type": "inline",
+        "tag": "viutv",
+        "rules": [
+          {
+            "domain_suffix": [
+              "cognito-identity.us-east-1.amazonaws.com",
+              "d1k2us671qcoau.cloudfront.net",
+              "d2anahhhmp1ffz.cloudfront.net",
+              "dfp6rglgjqszk.cloudfront.net",
+              "mobileanalytics.us-east-1.amazonaws.com",
+              "viu.com",
+              "viu.now.com",
+              "viu.tv"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "rthk",
+        "rules": [
+          {
+            "domain": [
+              "rthklive2-lh.akamaihd.net",
+              "rthkradio1-live.akamaized.net",
+              "rthkradio2-live.akamaized.net",
+              "rthkradio3-live.akamaized.net",
+              "rthkradio4-live.akamaized.net",
+              "rthkradio5-live.akamaized.net",
+              "rthkradiocmgrgb-live.akamaized.net",
+              "rthkradiocnrhk-live.akamaized.net",
+              "rthkradiopth-live.akamaized.net",
+              "rthktv31-live.akamaized.net",
+              "rthktv32-live.akamaized.net"
+            ],
+            "domain_suffix": [
+              "rthk.hk",
+              "rthk.org.hk"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "nowe",
+        "rules": [
+          {
+            "domain_suffix": [
+              "nowe.com",
+              "nowestatic.com"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "hk-open-tv",
+        "rules": [
+          {
+            "domain_suffix": [
+              "fantv.hk",
+              "hkopentv.com"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "remote",
+        "tag": "bahamut",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-bahamut.srs",
+        "download_detour": "direct",
+        "update_interval": "1d"
+      },
+      {
+        "type": "remote",
+        "tag": "kktv",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-kktv.srs",
+        "download_detour": "direct",
+        "update_interval": "1d"
+      },
+      {
+        "type": "remote",
+        "tag": "hamivideo",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-hamivideo.srs",
+        "download_detour": "direct",
+        "update_interval": "1d"
+      },
+      {
+        "type": "remote",
+        "tag": "litv",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-litv.srs",
+        "download_detour": "direct",
+        "update_interval": "1d"
+      },
+      {
+        "type": "remote",
+        "tag": "catchplay",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-catchplay.srs",
+        "download_detour": "direct",
+        "update_interval": "1d"
+      },
+      {
+        "type": "inline",
+        "tag": "linetv",
+        "rules": [
+          {
+            "domain": [
+              "d17lx9ucc6k9fc.cloudfront.net",
+              "d3pgb93pk7bvxj.cloudfront.net",
+              "d3vm9lcxb6xcm4.cloudfront.net"
+            ],
+            "domain_suffix": [
+              "chocotv.com.tw",
+              "d3c7rimkq79yfu.cloudfront.net",
+              "line-cdn.net",
+              "line-scdn.net",
+              "linetv.tw"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "friday",
+        "rules": [
+          {
+            "domain_suffix": [
+              "fetnet.net",
+              "friday.tw"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "taiwan-good",
+        "rules": [
+          {
+            "domain": [
+              "hamifans.emome.net"
+            ],
+            "domain_suffix": [
+              "skyking.com.tw"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "vidol",
+        "rules": [
+          {
+            "domain_suffix": [
+              "vidol.tv"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "remote",
+        "tag": "abema",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-abema.srs",
+        "download_detour": "direct",
+        "update_interval": "1d"
+      },
+      {
+        "type": "remote",
+        "tag": "tver",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-tver.srs",
+        "download_detour": "direct",
+        "update_interval": "1d"
+      },
+      {
+        "type": "remote",
+        "tag": "niconico",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-niconico.srs",
+        "download_detour": "direct",
+        "update_interval": "1d"
+      },
+      {
+        "type": "remote",
+        "tag": "unext",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-unext.srs",
+        "download_detour": "direct",
+        "update_interval": "1d"
+      },
+      {
+        "type": "remote",
+        "tag": "nhk",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-nhk.srs",
+        "download_detour": "direct",
+        "update_interval": "1d"
+      },
+      {
+        "type": "remote",
+        "tag": "radiko",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-radiko.srs",
+        "download_detour": "direct",
+        "update_interval": "1d"
+      },
+      {
+        "type": "inline",
+        "tag": "hulu-jp",
+        "rules": [
+          {
+            "domain_suffix": [
+              "happyon.jp",
+              "hjholdings.jp",
+              "hulu.jp",
+              "streaks.jp",
+              "yb.uncn.jp"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "wowow",
+        "rules": [
+          {
+            "domain_suffix": [
+              "wowow.co.jp"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "lemino",
+        "rules": [
+          {
+            "domain_suffix": [
+              "lemino.docomo.ne.jp"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "tving",
+        "rules": [
+          {
+            "domain_suffix": [
+              "tving.com"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "wavve",
+        "rules": [
+          {
+            "domain_suffix": [
+              "wavve.com"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "watcha",
+        "rules": [
+          {
+            "domain_suffix": [
+              "watcha.com"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "coupang-play",
+        "rules": [
+          {
+            "domain_suffix": [
+              "coupangplay.com"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "naver-tv",
+        "rules": [
+          {
+            "domain_suffix": [
+              "naver.com",
+              "smartmediarep.com"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "viki",
+        "rules": [
+          {
+            "domain_suffix": [
+              "kalhlspd-a.akamaihd.net",
+              "m-content-viki.s.llnwi.net",
+              "twemoji.maxcdn.com",
+              "viki.com",
+              "viki.io",
+              "viki.net",
+              "vikidash.akamaized.net",
+              "vikiplatform.com"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "remote",
+        "tag": "viu",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-viu.srs",
+        "download_detour": "direct",
+        "update_interval": "1d"
+      },
+      {
+        "type": "inline",
+        "tag": "wetv",
+        "rules": [
+          {
+            "domain": [
+              "wetv.qq.com"
+            ],
+            "domain_suffix": [
+              "iflix-images.akamaized.net",
+              "iflix.com",
+              "vv.video.qq.com",
+              "wetv.vip",
+              "wetvinfo.com"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "iqiyi-intl",
+        "rules": [
+          {
+            "domain": [
+              "cache.video.iqiyi.com"
+            ],
+            "domain_suffix": [
+              "inter.iqiyi.com",
+              "intl-rcd.iqiyi.com",
+              "intl-subscription.iqiyi.com",
+              "intl.iqiyi.com",
+              "iq.com"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "bilibili-intl",
+        "rules": [
+          {
+            "domain_suffix": [
+              "bilibili.tv"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "mewatch",
+        "rules": [
+          {
+            "domain_suffix": [
+              "mewatch.sg"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "vidio",
+        "rules": [
+          {
+            "domain_suffix": [
+              "vidio.com"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "hulu-us",
+        "rules": [
+          {
+            "domain_suffix": [
+              "112263.com",
+              "assetshuluimcom-a.akamaihd.net",
+              "callhulu.com",
+              "cws-hulu.conviva.com",
+              "findyourlimits.com",
+              "freehulu.com",
+              "hooloo.tv",
+              "hoolu.com",
+              "hoolu.tv",
+              "hu1u.com",
+              "huloo.cc",
+              "huloo.tv",
+              "hulu.com",
+              "hulu.hb.omtrdc.net",
+              "hulu.playback.edge.bamgrid.com",
+              "hulu.sc.omtrdc.net",
+              "hulu.tv",
+              "hulu.us",
+              "huluaction.com",
+              "huluad.com",
+              "huluapp.com",
+              "huluasks.com",
+              "hulucall.com",
+              "hulufree.com",
+              "hulugans.com",
+              "hulugermany.com",
+              "hulugo.com",
+              "huluim.com",
+              "huluinstantmessenger.com",
+              "huluitaly.com",
+              "hulunet.com",
+              "hulunetwork.com",
+              "huluplus.com",
+              "hulupremium.com",
+              "hulupurchase.com",
+              "huluqa.com",
+              "hulurussia.com",
+              "huluspain.com",
+              "hulusports.com",
+              "hulustream.com",
+              "huluteam.com",
+              "hulutv.com",
+              "huluusa.com",
+              "joinmaidez.com",
+              "mushymush.tv",
+              "myhulu.com",
+              "originalhulu.com",
+              "payhulu.com",
+              "prod.hjholdings.tv",
+              "registerhulu.com",
+              "thehulubraintrust.com",
+              "wwwhuluplus.com"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "remote",
+        "tag": "plutotv",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-plutotv.srs",
+        "download_detour": "direct",
+        "update_interval": "1d"
+      },
+      {
+        "type": "remote",
+        "tag": "tubi",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-tubi.srs",
+        "download_detour": "direct",
+        "update_interval": "1d"
+      },
+      {
+        "type": "remote",
+        "tag": "discoveryplus",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-discoveryplus.srs",
+        "download_detour": "direct",
+        "update_interval": "1d"
+      },
+      {
+        "type": "remote",
+        "tag": "cbs",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-cbs.srs",
+        "download_detour": "direct",
+        "update_interval": "1d"
+      },
+      {
+        "type": "remote",
+        "tag": "pbs",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-pbs.srs",
+        "download_detour": "direct",
+        "update_interval": "1d"
+      },
+      {
+        "type": "inline",
+        "tag": "paramount-plus",
+        "rules": [
+          {
+            "domain": [
+              "cbsi.live.ott.irdeto.com",
+              "cbsplaylistserver.aws.syncbak.com",
+              "cbsservice.aws.syncbak.com",
+              "link.theplatform.com"
+            ],
+            "domain_suffix": [
+              "cbsaavideo.com",
+              "cbsi.com",
+              "cbsivideo.com",
+              "paramountplus.com",
+              "pplusstatic.com"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "peacock",
+        "rules": [
+          {
+            "domain_suffix": [
+              "peacocktv.com"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "nbc",
+        "rules": [
+          {
+            "domain": [
+              "nbcstreaming.sc.omtrdc.net"
+            ],
+            "domain_suffix": [
+              "bravotv.com",
+              "cnbc.com",
+              "cnbcfm.com",
+              "eluniverso.com",
+              "eonline.com",
+              "msnbc.com",
+              "nbc-sports.go-vip.net",
+              "nbc.co",
+              "nbc.com",
+              "nbcnews.com",
+              "nbcsports.com",
+              "nbcsports.h-cdn.com",
+              "nbcudigitaladops.com",
+              "nbcuni.com",
+              "oxygen.com",
+              "peacocktv.com",
+              "s-nbcnews.com",
+              "syfy.com",
+              "telemundo.com",
+              "universalkids.com",
+              "usanetwork.com"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "fubo",
+        "rules": [
+          {
+            "domain_suffix": [
+              "fubo.tv",
+              "fubotv.com"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "sling",
+        "rules": [
+          {
+            "domain_suffix": [
+              "dishworld.com",
+              "movenetworks.com",
+              "movetv.com",
+              "sling.com",
+              "slinginternational.com"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "the-cw",
+        "rules": [
+          {
+            "domain": [
+              "cwtv-amd-akamai.akamaized.net",
+              "edge.cwtv-vod-ext.top.comcast.net"
+            ],
+            "domain_suffix": [
+              "cwseed.com",
+              "cwtv.com",
+              "thecwvideo.com"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "remote",
+        "tag": "dazn",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-dazn.srs",
+        "download_detour": "direct",
+        "update_interval": "1d"
+      },
+      {
+        "type": "remote",
+        "tag": "espn",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-espn.srs",
+        "download_detour": "direct",
+        "update_interval": "1d"
+      },
+      {
+        "type": "remote",
+        "tag": "bbc",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-bbc.srs",
+        "download_detour": "direct",
+        "update_interval": "1d"
+      },
+      {
+        "type": "inline",
+        "tag": "itv",
+        "rules": [
+          {
+            "domain": [
+              "itvpnpmobile-a.akamaihd.net"
+            ],
+            "domain_suffix": [
+              "itv.com",
+              "itvstatic.com"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "channel4",
+        "rules": [
+          {
+            "domain_suffix": [
+              "c4assets.com",
+              "channel4.com"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "channel5",
+        "rules": [
+          {
+            "domain": [
+              "d349g9zuie06uo.cloudfront.net"
+            ],
+            "domain_suffix": [
+              "channel5.com",
+              "my5.tv"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "sky-go",
+        "rules": [
+          {
+            "domain": [
+              "7d1732c7c34624df5f1270e29cf8d1ea78695fd5.cws.conviva.com",
+              "clientstream.launchdarkly.com",
+              "sky.com.ssl.d1.sc.omtrdc.net"
+            ],
+            "domain_suffix": [
+              "2cnt.net",
+              "epgsky.com",
+              "eu-1.xcal.tv",
+              "sky.com",
+              "skyanywhere.com",
+              "skycdp.com",
+              "skygo.co.nz",
+              "skysports.com",
+              "xmidt-eu.comcast.net"
+            ],
+            "domain_keyword": [
+              "bskyb",
+              "skygo",
+              "skyliveuk"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "arte",
+        "rules": [
+          {
+            "domain_suffix": [
+              "arte.tv"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "france-tv",
+        "rules": [
+          {
+            "domain_suffix": [
+              "france.tv"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "tf1",
+        "rules": [
+          {
+            "domain_suffix": [
+              "tf1.fr",
+              "tf1plus.fr"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "m6",
+        "rules": [
+          {
+            "domain_suffix": [
+              "m6.fr",
+              "m6plus.fr"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "canalplus",
+        "rules": [
+          {
+            "domain_suffix": [
+              "canalplus.com",
+              "mycanal.fr"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "molotov",
+        "rules": [
+          {
+            "domain_suffix": [
+              "molotov.tv"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "ard",
+        "rules": [
+          {
+            "domain_suffix": [
+              "ardmediathek.de"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "zdf",
+        "rules": [
+          {
+            "domain_suffix": [
+              "zdf.de"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "joyn",
+        "rules": [
+          {
+            "domain_suffix": [
+              "joyn.de"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "rtlplus",
+        "rules": [
+          {
+            "domain_suffix": [
+              "plus.rtl.de",
+              "rtlplus.com"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "raiplay",
+        "rules": [
+          {
+            "domain_suffix": [
+              "raiplay.it"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "mediaset",
+        "rules": [
+          {
+            "domain_suffix": [
+              "mediasetinfinity.mediaset.it"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "atresplayer",
+        "rules": [
+          {
+            "domain_suffix": [
+              "atresplayer.com"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "movistarplus",
+        "rules": [
+          {
+            "domain_suffix": [
+              "movistarplus.es"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "npo",
+        "rules": [
+          {
+            "domain_suffix": [
+              "npo.nl"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "stan",
+        "rules": [
+          {
+            "domain_suffix": [
+              "stan.com.au"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "binge",
+        "rules": [
+          {
+            "domain_suffix": [
+              "binge.com.au"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "kayo",
+        "rules": [
+          {
+            "domain_suffix": [
+              "kayosports.com.au"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "7plus",
+        "rules": [
+          {
+            "domain_suffix": [
+              "7plus.com.au"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "9now",
+        "rules": [
+          {
+            "domain_suffix": [
+              "9now.com.au"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "sbs-on-demand",
+        "rules": [
+          {
+            "domain_suffix": [
+              "sbs.com.au"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "abc-iview",
+        "rules": [
+          {
+            "domain_suffix": [
+              "iview.abc.net.au"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "tvnz",
+        "rules": [
+          {
+            "domain_suffix": [
+              "tvnz.co.nz"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "crave",
+        "rules": [
+          {
+            "domain_suffix": [
+              "crave.ca"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "cbc-gem",
+        "rules": [
+          {
+            "domain_suffix": [
+              "gem.cbc.ca"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "ctv",
+        "rules": [
+          {
+            "domain_suffix": [
+              "ctv.ca"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "remote",
+        "tag": "hotstar",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-hotstar.srs",
+        "download_detour": "direct",
+        "update_interval": "1d"
+      },
+      {
+        "type": "inline",
+        "tag": "zee5",
+        "rules": [
+          {
+            "domain_suffix": [
+              "zee5.com"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "sonyliv",
+        "rules": [
+          {
+            "domain_suffix": [
+              "sonyliv.com"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "shahid",
+        "rules": [
+          {
+            "domain_suffix": [
+              "shahid.mbc.net"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "osnplus",
+        "rules": [
+          {
+            "domain_suffix": [
+              "osnplus.com"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "starzplay",
+        "rules": [
+          {
+            "domain_suffix": [
+              "starzplay.com"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "tod",
+        "rules": [
+          {
+            "domain_suffix": [
+              "tod.tv"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "remote",
+        "tag": "globo",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-globo.srs",
+        "download_detour": "direct",
+        "update_interval": "1d"
+      },
+      {
+        "type": "inline",
+        "tag": "vix",
+        "rules": [
+          {
+            "domain_suffix": [
+              "vix.com"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "inline",
+        "tag": "clarovideo",
+        "rules": [
+          {
+            "domain_suffix": [
+              "clarovideo.com"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "remote",
+        "tag": "openai",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-openai.srs",
+        "download_detour": "direct",
+        "update_interval": "1d"
+      },
+      {
+        "type": "remote",
+        "tag": "anthropic",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-anthropic.srs",
+        "download_detour": "direct",
+        "update_interval": "1d"
+      },
+      {
+        "type": "remote",
+        "tag": "google-gemini",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-google-gemini.srs",
+        "download_detour": "direct",
+        "update_interval": "1d"
+      },
+      {
+        "type": "remote",
+        "tag": "perplexity",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-perplexity.srs",
+        "download_detour": "direct",
+        "update_interval": "1d"
+      },
+      {
+        "type": "remote",
+        "tag": "xai",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-xai.srs",
+        "download_detour": "direct",
+        "update_interval": "1d"
+      },
+      {
+        "type": "remote",
+        "tag": "ip-detect",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-category-ip-geo-detect.srs",
+        "download_detour": "direct",
+        "update_interval": "1d"
+      },
+      {
+        "type": "remote",
+        "tag": "google",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-google.srs",
+        "download_detour": "direct",
+        "update_interval": "1d"
+      },
+      {
+        "type": "inline",
+        "tag": "service-extra",
+        "rules": [
+          {
+            "domain": [
+              "hbogeo.cust.footprint.net",
+              "atv-ps.amazon.com",
+              "atv-ps-eu.amazon.com",
+              "atv-ps-fe.amazon.com",
+              "avodmp4s3ww-a.akamaihd.net",
+              "spotify-com.akamaized.net"
+            ],
+            "domain_suffix": [
+              "dssedge.com",
+              "warnermediacdn.com",
+              "aiv-delivery.net",
+              "pv-cdn.net",
+              "spotilocal.com",
+              "tiktokd.com",
+              "tiktokmusic.app",
+              "ai.google.dev",
+              "copilot.microsoft.com",
+              "copilot.cloud.microsoft",
+              "sydney.bing.com",
+              "edgeservices.bing.com"
+            ],
+            "domain_regex": [
+              "(^|\\.)netflixdnstest[0-9]+\\.com$",
+              "^avoddashs[a-z0-9-]*\\.(?:akamaihd|akamaized)\\.net$"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "remote",
+        "tag": "instagram",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-instagram.srs",
+        "download_detour": "direct",
+        "update_interval": "1d"
+      },
+      {
+        "type": "remote",
+        "tag": "facebook",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-facebook.srs",
+        "download_detour": "direct",
+        "update_interval": "1d"
+      },
+      {
+        "type": "remote",
+        "tag": "bandcamp",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-bandcamp.srs",
+        "download_detour": "direct",
+        "update_interval": "1d"
+      },
+      {
+        "type": "remote",
+        "tag": "apple-podcasts",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-apple-podcasts.srs",
+        "download_detour": "direct",
+        "update_interval": "1d"
+      },
+      {
+        "type": "inline",
+        "tag": "audio-extra",
+        "rules": [
+          {
+            "domain_suffix": [
+              "tunein.com",
+              "mixcloud.com",
+              "iheart.com",
+              "iheartradio.com",
+              "audiomack.com",
+              "audible.com",
+              "music.amazon.com"
+            ],
+            "domain_regex": [
+              "^music\\.amazon\\.(?:co\\.uk|co\\.jp|de|fr|it|es|ca|com\\.au|com\\.br|in)$"
+            ]
+          }
+        ]
+      }
+    ],
+    "final": "direct"
+  },
+  "experimental": {
+    "cache_file": {
+      "enabled": true,
+      "path": "tw1-https-rule-set-cache.db"
+    }
+  }
+}

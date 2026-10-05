@@ -1,0 +1,11 @@
+{
+  "protocol": "wg",
+  "mtu": 0,
+  "local_address": "REPLACE_ME_LOCAL_CIDR",
+  "private_key": "REPLACE_ME_PRIVATE_KEY",
+  "peer_address": "REPLACE_ME_PEER_HOST_OR_IP",
+  "peer_port": 51820,
+  "peer_public_key": "REPLACE_ME_PEER_PUBLIC_KEY",
+  "dns_server": "162.252.172.57",
+  "direct_dns": "1.1.1.1"
+}

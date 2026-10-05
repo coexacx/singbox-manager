@@ -1,0 +1,9 @@
+{
+  "protocol": "socks5",
+  "server": "REPLACE_ME_SOCKS5_HOST_OR_IP",
+  "server_port": 1080,
+  "username": "",
+  "password": "",
+  "udp_enabled": false,
+  "direct_dns": "1.1.1.1"
+}

@@ -1,0 +1,9 @@
+{
+  "protocol": "https",
+  "server": "REPLACE_ME_PROXY_HOST_OR_IP",
+  "server_port": 443,
+  "tls_server_name": "REPLACE_ME_PROXY_TLS_DOMAIN",
+  "username": "REPLACE_ME_USERNAME",
+  "password": "REPLACE_ME_PASSWORD",
+  "direct_dns": "1.1.1.1"
+}
