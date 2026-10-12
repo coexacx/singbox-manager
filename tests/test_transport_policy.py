@@ -165,6 +165,12 @@ class Inventory(unittest.TestCase):
         self.assertEqual(self.a['latency_ms'],3);self.assertEqual(self.a['http_latency_ms'],999)
         self.assertIn('日本',self.a['name'])
 
+    def test_legacy_failed_proxy_status_requires_fresh_verification(self):
+        self.a['status']='dead';manager.write_json(manager.DATABASE,self.data)
+        result=manager.load()
+        self.assertEqual(result['nodes'][0]['status'],'unknown')
+        self.assertEqual(result['failure_policy'],'immediate-v1')
+
     def test_legacy_http_ranking_is_invalidated_on_upgrade(self):
         data=copy.deepcopy(self.data);data.pop('latency_schema');manager.write_json(manager.DATABASE,data)
         updated=manager.load()

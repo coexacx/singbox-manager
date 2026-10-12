@@ -68,6 +68,14 @@ def load():
             record['http_latency_ms'] = record.get('latency_ms')
             record.update(latency_ms=None, latency_method=None, latency_checked_at=None, reachability='unknown', failures=0)
         data['latency_schema'] = 'transport-v1'
+    if data.get('failure_policy') != 'immediate-v1':
+        # Old full-proxy scans may have failed because the account or an IP API
+        # was rate limited. Their historical failures are not fresh evidence.
+        for record in data['nodes']:
+            if record.get('status') == 'dead':
+                record.update(status='unknown', proxy_checked_at=0)
+                record.pop('error', None)
+        data['failure_policy'] = 'immediate-v1'
     return data
 
 
