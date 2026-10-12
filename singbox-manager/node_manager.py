@@ -196,18 +196,23 @@ def test_record(record, geography=False):
 def check_record(record, geography=False, count_failure=False):
     now = time.time()
     stamp = record.get('latency_checked_at') or 0
-    if 0 <= now-stamp < policy.settings()['transport_cache_ttl']:
+    config = policy.settings()
+    cache_ttl = min(config['transport_cache_ttl'], config['standby_interval'])
+    if 0 <= now-stamp < cache_ttl:
+        record.pop('transport_deferred', None)
         print(f"{name(record)}：复用近期 {record.get('latency_method') or '服务器'} 测速结果", flush=True)
         return record.get('reachability') == 'reachable'
     print(f"正在测量 {name(record)} 的服务器延迟（不进行代理认证）…", flush=True)
     try:
         info = test_record(record)
     except policy.Deferred as exc:
+        record['transport_deferred'] = True
         record['transport_error'] = str(exc)
         print(f'测速延后：{exc}；不计失败', flush=True)
         return None
     except (ValueError, OSError, RuntimeError, subprocess.SubprocessError):
         info = {'reachability': 'unknown', 'latency_ms': None, 'transport_error': '测速工具或本机网络暂不可用'}
+    record.pop('transport_deferred', None)
     record.update(info)
     record['latency_checked_at'] = now
     record['latency_method'] = 'ping' if record['node']['protocol'] == 'wg' else 'tcping'
@@ -349,12 +354,12 @@ def connect_best(data, exclude=None, events=None, reason="按 TCPing/Ping 延迟
         check_record(record, count_failure=False)
     prune_transport(data, events)
     candidates = sorted((r for r in data['nodes'] if r['id'] != exclude
-                         and r.get('reachability') == 'reachable'),
+                         and not r.get('transport_deferred') and r.get('reachability') == 'reachable'),
                         key=lambda r: r.get('latency_ms') if r.get('latency_ms') is not None else float('inf'))
     # ICMP can be filtered; unknown WireGuard endpoints are tried last, never
     # pronounced dead from ping silence. TCP endpoints must complete a handshake.
     candidates += [r for r in data['nodes'] if r['id'] != exclude and r['node']['protocol'] == 'wg'
-                   and r.get('reachability') == 'unknown']
+                   and not r.get('transport_deferred') and r.get('reachability') == 'unknown']
     for record in candidates:
         if activate(data, record, apply_pending=False):
             if events is not None:

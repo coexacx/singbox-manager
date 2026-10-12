@@ -2,8 +2,8 @@
 set -Eeuo pipefail
 # Chinese menus, node names and child processes must share one encoding.
 export PYTHONUTF8=1 PYTHONIOENCODING=utf-8
-ASSET_URL=https://raw.githubusercontent.com/coexacx/singbox-manager/main/packages/singbox-assets-865b5221b9ee0e16.tar.gz
-ASSET_SHA256=865b5221b9ee0e1633921537a28be0d547217e69beb6c7abcf05298f0511a425
+ASSET_URL=https://raw.githubusercontent.com/coexacx/singbox-manager/main/packages/singbox-assets-2046007704f8f0bc.tar.gz
+ASSET_SHA256=2046007704f8f0bc728e033c377d50c8a463ef0326510f3c75084bcdeef6ccd6
 LIB=/usr/local/lib/singbox-manager
 STATE=/var/lib/singbox-manager
 CONFIG_DIR=/etc/sing-box

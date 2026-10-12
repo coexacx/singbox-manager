@@ -126,6 +126,18 @@ class Inventory(unittest.TestCase):
             for _ in range(3):manager.scan(self.data)
         measured.assert_not_called();activated.assert_not_called();health.assert_not_called()
 
+    def test_shortened_standby_interval_is_not_blocked_by_longer_cache(self):
+        self.data['nodes']=[self.a];self.a['latency_checked_at']=time.time()-70
+        with patch.object(policy,'settings',return_value=dict(policy.DEFAULTS,standby_interval=60)),patch.object(manager,'test_record',return_value={'reachability':'reachable','latency_ms':8}) as measure:
+            manager.scan(self.data,scheduled=True)
+        measure.assert_called_once()
+
+    def test_deferred_transport_probe_never_uses_stale_score_to_connect(self):
+        for r in self.data['nodes']:r['latency_checked_at']=0
+        with patch.object(manager,'test_record',side_effect=policy.Deferred('budget')),patch.object(manager,'activate') as activate:
+            self.assertFalse(manager.connect_best(self.data))
+        activate.assert_not_called();self.assertEqual(len(self.data['nodes']),2)
+
     def test_silent_wireguard_never_deleted_by_transport_checks(self):
         node=manager.new_record(parse_block(WG));self.data['nodes']=[node]
         with patch.object(manager,'test_record',return_value={'reachability':'unknown','latency_ms':None}):
