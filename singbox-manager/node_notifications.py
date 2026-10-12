@@ -3,7 +3,7 @@
 import time
 
 PROTOCOLS = {"wg": "WireGuard", "https": "HTTPS", "shadowsocks": "Shadowsocks", "socks5": "SOCKS5"}
-STATUSES = {"alive": "存活", "dead": "失败", "unknown": "未检测"}
+STATUSES = {"alive": "代理已验证", "dead": "失败", "unknown": "代理未验证"}
 
 
 def clean(value, limit=100):
@@ -20,6 +20,8 @@ def public_snapshot(data):
             "protocol": clean(record.get("node", {}).get("protocol")),
             "status": record.get("status", "unknown"),
             "latency_ms": record.get("latency_ms"),
+            "latency_method": record.get("latency_method"),
+            "reachability": record.get("reachability"),
             "failures": record.get("failures", 0),
             "ip": clean(record.get("ip")),
             "location_zh": clean(record.get("location_zh")),
@@ -46,29 +48,29 @@ def summary_lines(snapshot):
         f"当前节点：{clean(active.get('name')) if active else '未选择节点库节点'}",
         f"自动连接：{'开启' if snapshot.get('auto') else '关闭'}",
         f"节点总览：共 {len(nodes)} 个 / 存活 {alive} / 失败 {dead} / 未检测 {len(nodes)-alive-dead}",
-        f"删除规则：连续 {snapshot.get('delete_after', 3)} 轮失败后删除，成功清零",
+        '删除规则：TCP 握手或实际连接失败立即清除；WG ping 无回复保留',
     ]
     if snapshot.get("all_unavailable"):
         lines.append("⚠️ 节点库当前无可用节点" if nodes else "⚠️ 节点库已无可用节点，需导入新节点")
     if snapshot.get("last_scan"):
-        lines.append("最近全库检测：" + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(snapshot["last_scan"])))
+        lines.append("最近服务器测速：" + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(snapshot["last_scan"])))
     else:
-        lines.append("最近全库检测：尚未完成；以下为已有检测结果")
+        lines.append("最近服务器测速：尚未完成；以下为已有检测结果")
     if snapshot.get("pending_count"):
         lines.append(f"待重试事件通知：{snapshot['pending_count']} 条")
     lines.append("── 节点明细（最近检测结果）──")
     for index, node in enumerate(nodes, 1):
         current = " [当前]" if node.get("id") == snapshot.get("active_id") else ""
-        delay = f"{node['latency_ms']} ms" if node.get("latency_ms") is not None else "—"
+        delay = f"{node.get('latency_method') or '待测速'} {node['latency_ms']} ms" if node.get("latency_ms") is not None else "—"
         lines.append(f"{index}. {clean(node.get('name'))}{current}")
         if node.get("pending_changes"):
             lines.append("   存在待应用修改；自动巡检使用原配置")
-        lines.append(f"   {PROTOCOLS.get(node.get('protocol'), '未知')} | {STATUSES.get(node.get('status'), '未知')} | {delay} | 连续失败 {node.get('failures', 0)} 轮 | IP {clean(node.get('ip')) or '待查询'}")
+        lines.append(f"   {PROTOCOLS.get(node.get('protocol'), '未知')} | {STATUSES.get(node.get('status'), '未知')} | {delay} | IP {clean(node.get('ip')) or '待查询'}")
     return lines
 
 
 def event_lines(events):
-    titles = {"connected": "节点连接成功", "auto_connected": "自动连接成功", "failover": "自动故障切换成功",
+    titles = {"probe_deferred": "检测暂缓（未计失败）", "connected": "节点连接成功", "auto_connected": "自动连接成功", "failover": "自动故障切换成功",
               "connect_failed": "节点连接失败", "deleted": "节点已删除", "all_unavailable": "全部节点不可用",
               "recovered": "节点可用性恢复", "stopped": "代理已手动关闭", "stop_failed": "关闭代理失败",
               "mode_changed": "运行模式切换成功", "mode_failed": "运行模式切换失败", "edited": "节点配置已保存"}
@@ -90,7 +92,7 @@ def event_lines(events):
         if event.get("failed"):
             lines.append("连接失败的候选：" + "、".join(clean(item) for item in event["failed"]))
         for item in event.get("deleted", []):
-            lines.append(f"删除：{clean(item.get('name'))}（连续失败 {item.get('failures', 0)} 轮）")
+            lines.append(f"删除：{clean(item.get('name'))}")
     return lines
 
 

@@ -16,6 +16,7 @@ import tempfile
 import time
 from urllib.parse import urlencode
 from deadline import deadline
+import probe_policy as policy
 
 CONFIG = pathlib.Path("/etc/sing-box/manager/telegram.json")
 SINGBOX_CONFIG = pathlib.Path("/etc/sing-box/config.json")
@@ -203,10 +204,19 @@ def configured():
 
 
 def proxy_info():
+    key, cached = policy.active_info()
+    if cached.get('ip') and 0 <= time.time()-cached.get('ip_at', 0) < 1800:
+        return dict(cached, cached=True)
     try:
-        return lookup_proxy_ip(18081)
-    except RuntimeError as exc:
-        raise ValueError(str(exc)) from exc
+        with policy.operation('metadata'):
+            info = lookup_proxy_ip(18081, rounds=1, timeout=15)
+        if key:
+            policy.cache_put(key, info, health=False)
+        return info
+    except (RuntimeError, OSError):
+        if cached.get('ip'):
+            return dict(cached, cached=True)
+        raise ValueError('出口信息暂不可用或本机检测已延后；不据此判定代理失效')
 
 
 def service_snapshot():
@@ -263,7 +273,7 @@ def notify(event="periodic", snapshot=None, events=None):
     except ValueError as exc:
         info = None
         problem = str(exc)
-        status = "异常（代理出口检测失败）"
+        status = "内核运行中；出口信息暂不可用" if active == "active" else status
     unavailable = bool((snapshot or {}).get("all_unavailable"))
     if unavailable:
         status = "异常（节点库无可用节点）"
@@ -281,9 +291,11 @@ def notify(event="periodic", snapshot=None, events=None):
         f"内核版本：{version}",
         f"代理协议：{protocol} ｜ TUN：{tun}",
         f"流量模式：{traffic}",
-        f"代理出口 IP{'（最近检测）' if special else ''}：{info['ip'] if info else '不可用'}",
+        f"代理出口 IP{'（最近检测）' if special or (info and info.get('cached')) else ''}：{info['ip'] if info else '不可用'}",
     ]
     if info:
+        if info.get('cached') and info.get('ip_at'):
+            lines.append('出口信息采样：' + time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(info['ip_at'])))
         place = " / ".join(str(info.get(key, "")).strip() for key in ("city", "region", "country") if info.get(key))
         lines.append(f"IP 地理位置：{place or '未知'}")
         if info.get("org"):

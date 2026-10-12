@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 import sys
 import tempfile
+import time
+from contextlib import nullcontext
 import unittest
 from unittest.mock import patch
 
@@ -67,12 +69,18 @@ class Lifecycle(unittest.TestCase):
                         patch.object(manager, 'notification_ready', return_value=False),
                         patch.object(manager, 'running', return_value=True),
                         patch.object(manager, 'health', return_value={'latency_ms': 50})]
+        isolation = [patch.object(manager.policy,'ROOT',self.root/'budget'),
+                     patch.object(manager.policy,'CONFIG',self.root/'policy.json'),
+                     patch.object(manager.policy,'operation',side_effect=lambda *a,**k:nullcontext()),
+                     patch.object(manager,'stop_runtime')]
+        for item in isolation:
+            item.start(); self.addCleanup(item.stop)
         for item in self.patches:
             item.start()
         self.a = manager.new_record(parse_block('socks5://a.example:1080'))
         self.b = manager.new_record(parse_block('socks5://b.example:1080'))
         for record, latency in ((self.a, 200), (self.b, 20)):
-            record.update(status='alive', latency_ms=latency, ip='192.0.2.1', location_zh='日本-东京')
+            record.update(status='alive', reachability='reachable',latency_method='tcping',latency_checked_at=time.time(),latency_ms=latency, ip='192.0.2.1', location_zh='日本-东京')
         self.data = dict(version=1, nodes=[self.a, self.b], auto=True, active_id=self.a['id'], delete_after=3)
 
     def tearDown(self):
@@ -92,35 +100,30 @@ class Lifecycle(unittest.TestCase):
             self.assertTrue(manager.connect_best(self.data))
             self.assertEqual([c.args[1]['id'] for c in activate.call_args_list], [self.b['id'], self.a['id']])
 
-    def test_dead_active_triggers_next_node_only_in_auto_mode(self):
-        self.a['status'] = 'dead'
-        with patch.object(manager, 'check_record'), patch.object(manager, 'connect_best', return_value=True) as connect:
-            manager.scan(self.data, scheduled=True)
+    def test_confirmed_active_failure_deletes_and_fails_over_only_in_auto_mode(self):
+        self.a['watch_failures'] = 1
+        with patch.object(manager, 'health',side_effect=RuntimeError('offline')), patch.object(manager, 'connect_best', return_value=True) as connect:
+            manager.watch(self.data)
             self.assertEqual(connect.call_args.kwargs['exclude'], self.a['id'])
+        self.assertNotIn(self.a,self.data['nodes'])
         self.data['auto'] = False
-        with patch.object(manager, 'check_record'), patch.object(manager, 'connect_best') as connect:
-            manager.scan(self.data, scheduled=True)
+        with patch.object(manager, 'connect_best') as connect:
+            manager.watch(self.data)
             connect.assert_not_called()
 
-    def test_three_failed_rounds_then_delete(self):
-        self.data.update(auto=False, active_id=None)
-        self.data['nodes'] = [self.a]
-        with patch.object(manager, 'test_record', side_effect=RuntimeError('unreachable')):
-            for failures in (1, 2):
-                manager.scan(self.data, scheduled=True)
-                self.assertEqual(self.a['failures'], failures)
-                self.assertEqual(len(self.data['nodes']), 1)
+    def test_first_tcp_failure_deletes_immediately(self):
+        self.data.update(auto=False, active_id=None, nodes=[self.a])
+        self.a['latency_checked_at'] = 0
+        with patch.object(manager, 'test_record', return_value={'reachability':'unreachable','latency_ms':None}):
             manager.scan(self.data, scheduled=True)
         self.assertEqual(self.data['nodes'], [])
 
-    def test_success_resets_and_manual_failures_do_not_prune(self):
-        self.a['failures'] = 2
-        with patch.object(manager, 'test_record', return_value={'latency_ms': 10}):
-            manager.check_record(self.a, count_failure=True)
-        self.assertEqual(self.a['failures'], 0)
-        with patch.object(manager, 'test_record', side_effect=RuntimeError('unreachable')):
-            manager.check_record(self.a, count_failure=False)
-        self.assertEqual(self.a['failures'], 0)
+    def test_reachable_server_does_not_verify_proxy(self):
+        self.a.update(status='unknown',latency_checked_at=0)
+        with patch.object(manager, 'test_record', return_value={'reachability':'reachable','latency_ms':10}):
+            manager.check_record(self.a)
+        self.assertEqual(self.a['status'],'unknown')
+        self.assertEqual(self.a['latency_ms'],10)
 
     def test_failed_activation_preserves_existing_selected_node_and_profile(self):
         path = self.root/'socks5.json'

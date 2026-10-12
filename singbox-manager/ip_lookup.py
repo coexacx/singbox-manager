@@ -14,12 +14,12 @@ SOURCES = (
 )
 
 
-def lookup_proxy_ip(port, rounds=2, timeout=20, progress=None):
+def lookup_proxy_ip(port, rounds=1, timeout=15, progress=None, max_sources=3):
     """Return the first valid proxy exit IP and any available location data."""
     errors = []
     deadline = time.monotonic() + timeout
     for attempt in range(rounds):
-        for name, url in SOURCES:
+        for name, url in SOURCES[:max_sources]:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 break
@@ -54,6 +54,7 @@ def lookup_proxy_ip(port, rounds=2, timeout=20, progress=None):
                     "city": str(data.get("city") or ""),
                     "region": str(data.get("region") or ""),
                     "country": str(data.get("country") or ""),
+                    "country_code": str(data.get("country_code") or data.get("country") or ""),
                     "org": str(data.get("org") or connection.get("isp") or ""),
                     "source": name,
                 }

@@ -16,7 +16,7 @@ error() { printf '错误：%s\n' "$*" >&2; }
 remove_file() { [[ ! -e $1 ]] || unlink -- "$1"; }
 require_install() {
   [[ -e $MARKER ]] || { error '请先选择 1 安装。'; return 1; }
-  [[ -f $LIB/API_VERSION && $(cat "$LIB/API_VERSION") == 5 ]] || { error '管理器需要更新，请先选择 1；现有节点资料会保留。'; return 1; }
+  [[ -f $LIB/API_VERSION && $(cat "$LIB/API_VERSION") == 6 ]] || { error '管理器需要更新，请先选择 1；现有节点资料会保留。'; return 1; }
 }
 locked_action() {
   ( flock -w 5 9 || { error '节点检测或切换正在进行，请稍后重试。'; return 1; }; "$@"; ) 9>/run/lock/singbox-manager.lock
@@ -55,7 +55,7 @@ install_manager() {
     chmod 0600 "$STATE/nft_was_installed"
   fi
   local dependencies=() package
-  for package in ca-certificates curl python3 iproute2 nftables; do
+  for package in ca-certificates curl python3 iproute2 nftables iputils-ping; do
     if ! dpkg-query -s "$package" 2>/dev/null | grep -q '^Status: install ok installed$'; then dependencies+=("$package"); fi
   done
   if [[ ${#dependencies[@]} -gt 0 ]]; then
@@ -122,6 +122,7 @@ EOF
   if [[ ! -e $PROFILES/nodes.txt ]]; then
     install -m 0600 "$LIB/nodes.example.txt" "$PROFILES/nodes.txt"
   fi
+  python3 "$LIB/probe_policy.py" init
   python3 "$LIB/node_manager.py" init
   systemctl enable --now singbox-manager-nodes.timer >/dev/null
   systemctl enable --now singbox-manager-watch.timer >/dev/null
@@ -190,7 +191,12 @@ restore_previous() {
   [[ $failed == 0 ]]
 }
 
-enable_profile() (
+enable_profile() {
+  require_install || return 1
+  python3 "$LIB/probe_policy.py" activate "$1" "${2:-$(current_tun_mode)}" "${3:-$(current_traffic_mode)}" "${4:-$PROFILES/$1.json}" "${5:-}"
+}
+
+apply_profile() (
   local protocol=$1 mode=${2:-$(current_tun_mode)} traffic=${3:-$(current_traffic_mode)} candidate backup item
   local node_file=${4:-$PROFILES/$protocol.json} armed=0 was_active=0 was_enabled=0
   require_install || return 1
@@ -206,7 +212,7 @@ enable_profile() (
       else
         error '切换失败，恢复服务也未完成；请检查 systemctl status sing-box 与服务日志。'
       fi
-      result=1
+      [[ $result != 0 ]] || result=1
     fi
     python3 -c 'import shutil,sys; shutil.rmtree(sys.argv[1])' "$backup"
     exit "$result"
@@ -221,8 +227,10 @@ enable_profile() (
     error 'sing-box 配置校验失败或超时。'; return 1
   fi
   say '[1/3] 切换前检测节点连通性（最多 60 秒）…'
-  if ! timeout -k 3s 60s python3 "$LIB/probe.py" "$candidate"; then
-    error '节点不可用或检测超时，保持现有配置。'; return 1
+  local probe_status=0
+  timeout -k 3s 60s python3 "$LIB/probe.py" --preflight "$candidate" "$node_file" || probe_status=$?
+  if [[ $probe_status != 0 ]]; then
+    error '节点未通过实际验证，保持现有配置。'; return "$probe_status"
   fi
   systemctl is-active --quiet sing-box.service && was_active=1
   systemctl is-enabled --quiet sing-box.service && was_enabled=1
@@ -238,15 +246,18 @@ enable_profile() (
   say '[2/3] 启动代理服务（最多 60 秒）…'
   timeout 10s systemctl enable sing-box.service >/dev/null || return 1
   if [[ $was_active == 1 ]]; then
-    timeout -k 3s 60s systemctl restart sing-box.service || return 1
+    timeout -k 3s 60s systemctl restart sing-box.service || return 75
   else
-    timeout -k 3s 60s systemctl start sing-box.service || return 1
+    timeout -k 3s 60s systemctl start sing-box.service || return 75
   fi
   if command -v resolvectl >/dev/null; then timeout 3s resolvectl flush-caches 2>/dev/null || true; fi
   if command -v nscd >/dev/null; then timeout 3s nscd -i hosts 2>/dev/null || true; fi
   say '[3/3] 启用后复检服务和节点（最多 75 秒）…'
-  if ! systemctl is-active --quiet sing-box.service || ! timeout -k 3s 75s python3 "$LIB/probe.py" --active "$protocol"; then
-    error '启用后复检失败或超时。'; return 1
+  systemctl is-active --quiet sing-box.service || { error '本机服务启动失败，暂不判断节点失效。'; return 75; }
+  probe_status=0
+  timeout -k 3s 75s python3 "$LIB/probe.py" --active "$protocol" || probe_status=$?
+  if [[ $probe_status != 0 ]]; then
+    error '启用后复检未通过。'; return "$probe_status"
   fi
   printf '%s\n' "$protocol" >"$STATE/active" && chmod 0600 "$STATE/active" || return 1
   armed=0
@@ -333,7 +344,6 @@ detect_proxy() {
     *) error '当前协议状态无效。'; return 1 ;;
   esac
   say "正在检测 $protocol 代理，请稍候…"
-  remove_file "$STATE/exit_ip"
   timeout -k 3s 75s python3 "$LIB/probe.py" --active "$protocol"
 }
 
@@ -382,7 +392,7 @@ uninstall_manager() {
   for protocol in https shadowsocks wg socks5; do remove_file "/var/lib/sing-box/split-$protocol-cache.db"; done
   remove_file /var/lib/sing-box/split-fakeip-cache.db
   remove_file /var/lib/sing-box/split-rule-cache.db
-  python3 - "$LIB" "$PROFILES" "$STATE" <<'PY'
+  python3 - "$LIB" "$PROFILES" "$STATE" /var/lib/singbox-manager-budget <<'PY'
 import pathlib, shutil, sys
 for raw in sys.argv[1:]:
     path = pathlib.Path(raw)
@@ -442,7 +452,12 @@ show_menu() {
 
 main() {
   local choice
-  if [[ ${1:-} == --activate-node ]]; then
+  if [[ ${1:-} == --apply-profile ]]; then
+    [[ $EUID -eq 0 && ${SBM_POLICY_MANAGED:-} == 1 && $# -eq 6 ]] || return 1
+    shift
+    apply_profile "$@"
+    return $?
+  elif [[ ${1:-} == --activate-node ]]; then
     [[ $EUID -eq 0 && $# -eq 2 ]] || return 1
     local protocol
     protocol=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["protocol"])' "$2")

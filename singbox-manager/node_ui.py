@@ -57,11 +57,13 @@ class View:
         for index in range(page * PAGE_SIZE, min((page + 1) * PAGE_SIZE, len(records))):
             record = records[index]
             current = record.get("id") == active_id and active_id is not None
-            status, color = {"alive": ("存活", "green"), "dead": ("失败", "red")}.get(record.get("status"), ("未检测", "yellow"))
+            status, color = {"alive": ("代理已验证", "green"), "dead": ("失败", "red")}.get(record.get("status"), ("代理未验证", "yellow"))
             self.text(f"{index + 1:02d} {'▶ ' if current else ''}{record.get('custom_name') or record.get('name', '未命名')}", "white" if current else None)
             protocol = PROTOCOLS.get(record.get("node", {}).get("protocol"), "未知")
-            latency = f"{record['latency_ms']} ms" if record.get("latency_ms") is not None else "待检测"
-            self.text(f"   {protocol} · {status} · {latency} · 失败 {record.get('failures', 0)} 轮", color)
+            latency = f"{record.get('latency_method') or '待测速'} {record['latency_ms']} ms" if record.get("latency_ms") is not None else "待检测"
+            self.text(f"   {protocol} · {status} · {latency}", color)
+            reach = {'reachable':'服务器可达', 'unreachable':'TCP 不可达'}.get(record.get('reachability'), '服务器延迟未知')
+            self.text('   ' + reach, 'dim')
             self.text(f"   出口 {record.get('ip') or '待查询'}" + (" · 当前节点" if current else ""), "dim")
             if record.get("pending_node"):
                 self.text("   有待应用修改 · 手动连接成功后生效", "yellow")
@@ -83,8 +85,10 @@ def render_inventory(data, page=0, width=None, color=None):
     view.text("当前节点  " + current, "green" if data.get("active_id") else "dim")
     view.text(f"连接方式  {'自动 · 当前节点正常时保持连接' if data.get('auto') else '手动 · 故障时不自动切换'}")
     view.text(f"节点总览  {len(nodes)} 个 / 存活 {alive} / 失败 {dead} / 未检测 {len(nodes)-alive-dead}")
-    view.text(f"巡检规则  每 30 分钟 · 连续 {data.get('delete_after', 3)} 轮失败删除", "dim")
-    view.text("连接检查  每分钟 · 故障时按备用节点实测延迟切换", "dim")
+    view.text('备用巡检  分散轮询，每次一个；TCP 或实际连接失败立即清除', 'dim')
+    view.text("连接检查  每分钟调度 · 成功缓存 2 分钟；失败用第二地址复核", "dim")
+    view.text('选择规则  TCPing/Ping 升序；实际连接失败立即删除并尝试下一个', 'dim')
+    view.text('WG 未回复 ping：延迟未知、最后尝试，不因 ping 失败删除', 'dim')
     when = time.strftime("%m-%d %H:%M:%S", time.localtime(data["last_scan"])) if data.get("last_scan") else "尚未完成"
     view.text("上次巡检  " + when, "dim")
     page, pages = view.cards(nodes, data.get("active_id"), page)
@@ -94,7 +98,7 @@ def render_inventory(data, page=0, width=None, color=None):
     for line in ("01 批量导入       02 查看节点", "03 编辑节点       09 修改名称", "08 删除节点"):
         view.text(line)
     view.section("连接与巡检")
-    for line in ("04 选定节点并开启故障切换", "05 自动选择低延迟节点", "06 关闭自动连接   07 立即检测全部节点", "10 设置失败删除轮数", "00 返回主菜单"):
+    for line in ("04 选定节点并开启故障切换", "05 按 TCPing/Ping 自动连接", "06 关闭自动连接   07 全部服务器测速（不认证）", "10 设置备用节点复测间隔", "00 返回主菜单"):
         view.text(line, "cyan" if line.startswith("00") else None)
     view.text()
     return "\n".join(view.lines)

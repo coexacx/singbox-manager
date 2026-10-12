@@ -3,6 +3,8 @@ import json
 from pathlib import Path
 import sys
 import tempfile
+import time
+from contextlib import nullcontext
 import unittest
 from unittest.mock import patch
 
@@ -24,12 +26,18 @@ class Notifications(unittest.TestCase):
                         patch.object(manager, 'running', return_value=True),
                         patch.object(manager, 'health', return_value={'latency_ms': 20}),
                         patch.object(telegram, 'notify')]
+        isolation = [patch.object(manager.policy,'ROOT',self.root/'budget'),
+                     patch.object(manager.policy,'CONFIG',self.root/'policy.json'),
+                     patch.object(manager.policy,'operation',side_effect=lambda *a,**k:nullcontext()),
+                     patch.object(manager,'stop_runtime')]
+        for item in isolation:
+            item.start(); self.addCleanup(item.stop)
         self.mocks = [item.start() for item in self.patches]
         self.sender = self.mocks[-1]
         self.a = manager.new_record(parse_block('socks5://user:private-password@a.example:1080'))
         self.b = manager.new_record(parse_block('socks5://b.example:1080'))
         for record, title, delay in [(self.a,'日本-东京',30),(self.b,'新加坡',10)]:
-            record.update(name=title,status='alive',failures=0,latency_ms=delay,ip='192.0.2.1',location_zh=title)
+            record.update(name=title,status='alive',reachability='reachable',latency_method='tcping',latency_checked_at=time.time(),failures=0,latency_ms=delay,ip='192.0.2.1',location_zh=title)
         self.data = dict(version=1,nodes=[self.a,self.b],auto=True,active_id=self.a['id'],delete_after=3)
 
     def tearDown(self):
@@ -62,13 +70,12 @@ class Notifications(unittest.TestCase):
         self.assertEqual(json.loads(manager.DATABASE.read_text())['active_id'],self.b['id'])
 
     def test_failover_reports_reason_previous_and_current(self):
-        self.a['status']='dead'
-        with patch.object(manager,'check_record'),patch.object(manager,'activate',side_effect=self.activate):
-            manager.scan(self.data,scheduled=True)
-        event = self.sender.call_args.kwargs['events'][0]
-        self.assertEqual(event['kind'],'failover')
+        self.a['watch_failures']=1
+        with patch.object(manager,'health',side_effect=RuntimeError('offline')),patch.object(manager,'activate',side_effect=self.activate):
+            manager.watch(self.data)
+        event = next(e for e in self.sender.call_args.kwargs['events'] if e['kind']=='failover')
         self.assertEqual((event['previous'],event['current']),('日本-东京','新加坡'))
-        self.assertIn('检测失败',event['reason'])
+        self.assertIn('连接失败',event['reason'])
 
     def test_failed_candidate_is_in_successful_fallback_event(self):
         events=[]
@@ -76,22 +83,19 @@ class Notifications(unittest.TestCase):
             manager.connect_best(self.data,events=events)
         self.assertEqual(events[0]['failed'],['新加坡'])
 
-    def test_third_round_deletion_and_outage_dedup_then_recovery(self):
+    def test_immediate_deletion_and_outage_dedup_then_recovery(self):
         self.data.update(nodes=[self.a],auto=False,active_id=None)
+        self.a['latency_checked_at']=0
         captured=[]
         self.sender.side_effect=lambda **kwargs: captured.extend(copy.deepcopy(kwargs['events']))
-        with patch.object(manager,'test_record',side_effect=RuntimeError('offline')):
-            for expected in (1,2,3):
-                manager.scan(self.data,scheduled=True)
-                if expected < 3:
-                    self.assertEqual(len(self.data['nodes']),1)
-                    self.assertEqual(self.a['failures'],expected)
+        with patch.object(manager,'test_record',return_value={'reachability':'unreachable','latency_ms':None}):
             manager.scan(self.data,scheduled=True)
-        self.assertEqual([e['kind'] for e in captured],['all_unavailable','deleted'])
-        self.assertEqual(captured[-1]['deleted'],[{'name':'日本-东京','failures':3}])
+            manager.scan(self.data,scheduled=True)
+        self.assertEqual([e['kind'] for e in captured],['deleted','all_unavailable'])
+        self.assertEqual(captured[0]['deleted'],[{'name':'日本-东京','failures':0}])
         self.data['nodes']=[self.b]
         with patch.object(manager,'check_record'):
-            manager.scan(self.data,scheduled=True)
+            manager.scan(self.data)
         self.assertEqual(captured[-1]['kind'],'recovered')
         self.assertFalse(self.data['availability_alert'])
 

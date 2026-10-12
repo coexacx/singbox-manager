@@ -3,6 +3,8 @@ import io
 import json
 import sys
 import tempfile
+import time
+from contextlib import nullcontext
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -18,12 +20,18 @@ class CoordinatedState(unittest.TestCase):
         self.root = Path(self.tmp.name)
         self.patches = [patch.object(m, key, self.root/name) for key,name in [('DATABASE','db.json'),('PROFILES','profiles'),('STATE','state'),('LOCK','lock')]]
         self.patches += [patch.object(m,'emit_events'), patch.object(m,'running',return_value=True)]
+        isolation = [patch.object(m.policy,'ROOT',self.root/'budget'),
+                     patch.object(m.policy,'CONFIG',self.root/'policy.json'),
+                     patch.object(m.policy,'operation',side_effect=lambda *a,**k:nullcontext()),
+                     patch.object(m,'stop_runtime')]
+        for item in isolation:
+            item.start(); self.addCleanup(item.stop)
         self.mocks=[p.start() for p in self.patches]
         self.events=self.mocks[-2]
         m.PROFILES.mkdir();m.STATE.mkdir()
         self.a=m.new_record(parse_block('socks5://a.example:1080'))
         self.b=m.new_record(parse_block('socks5://b.example:1080'))
-        for n in (self.a,self.b):n.update(status='alive',latency_ms=10,location_zh='日本-东京',ip='192.0.2.1')
+        for n in (self.a,self.b):n.update(status='alive',reachability='reachable',latency_method='tcping',latency_checked_at=time.time(),latency_ms=10,location_zh='日本-东京',ip='192.0.2.1')
         self.data=dict(version=1,nodes=[self.a,self.b],active_id=self.a['id'],auto=True,delete_after=3)
         m.write_json(m.PROFILES/'socks5.json',self.a['node']);m.save(self.data)
         (m.STATE/'active').write_text('socks5')
@@ -49,7 +57,7 @@ class CoordinatedState(unittest.TestCase):
         self.assertEqual(self.a['status'],'alive');self.assertTrue(self.data['auto'])
         self.assertEqual(self.data['active_id'],self.a['id'])
         self.assertEqual(self.a['node'],old)
-        self.assertIn('pending_error',self.a)
+        self.assertNotIn('pending_node',self.a)
 
     def test_successful_apply_commits_draft_once_and_enables_failover(self):
         edited=self.edit()
@@ -127,10 +135,10 @@ class CoordinatedState(unittest.TestCase):
 
     def test_watch_retests_spares_sorts_latency_and_skips_failed_activation(self):
         c=m.new_record(parse_block('socks5://c.example:1080'));c.update(status='alive',latency_ms=1,failures=2)
-        self.data['nodes'].append(c);self.a['failures']=2
+        self.data['nodes'].append(c);self.a['failures']=2;self.a['watch_failures']=1
         def check(record,**kw):
             self.assertFalse(kw['count_failure'])
-            record.update(status='alive',latency_ms=2 if record is self.b else 20)
+            record.update(status='alive',reachability='reachable',latency_method='tcping',latency_ms=2 if record is self.b else 20)
         attempted=[]
         def activate(data,record,**kw):
             attempted.append(record['id']);self.assertFalse(kw['apply_pending'])
@@ -140,8 +148,8 @@ class CoordinatedState(unittest.TestCase):
             m.watch(self.data)
         self.assertEqual(attempted,[self.b['id'],c['id']])
         self.assertEqual(self.data['active_id'],c['id'])
-        self.assertEqual(self.a['failures'],2);self.assertEqual(len(self.data['nodes']),3)
-        self.assertEqual(self.events.call_args.args[1][0]['kind'],'failover')
+        self.assertEqual(self.a['failures'],2);self.assertEqual(len(self.data['nodes']),2)
+        self.assertTrue(any(e['kind']=='failover' for e in self.events.call_args.args[1]))
 
     def test_watch_skips_when_user_disabled_auto(self):
         self.data['auto']=False

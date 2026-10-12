@@ -5,6 +5,7 @@ Description=Check active sing-box connection every minute
 OnBootSec=60s
 OnUnitInactiveSec=60s
 AccuracySec=5s
+RandomizedDelaySec=5s
 Unit=singbox-manager-watch.service
 
 [Install]

@@ -54,7 +54,7 @@ class ShellTransaction(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory();self.root=Path(self.tmp.name)
         for folder in ('lib/templates','profiles','state','bin','config'): (self.root/folder).mkdir(parents=True)
-        (self.root/'lib/API_VERSION').write_text('5')
+        (self.root/'lib/API_VERSION').write_text('6')
         (self.root/'lib/templates/socks5.json').write_text('{}')
         (self.root/'profiles/socks5.json').write_text('{}')
         (self.root/'state/installed').touch()
@@ -68,7 +68,7 @@ r=pathlib.Path(os.environ['TEST_ROOT'])
 if sys.argv[1]=='--active':
  (r/'state/exit_ip').write_text('192.0.2.2')
  (r/'state/probe-result.json').write_text('{}')
- sys.exit(1 if (r/'fail-post').exists() else 0)
+ sys.exit(75 if (r/'defer-post').exists() else 1 if (r/'fail-post').exists() else 0)
 sys.exit(1 if (r/'fail-pre').exists() else 0)
 ''')
         self.command('systemctl','''#!/usr/bin/env python3
@@ -94,7 +94,7 @@ if a in ['enable','disable']:(r/'service-enabled').write_text('1' if a=='enable'
 LIB=$TEST_ROOT/lib; STATE=$TEST_ROOT/state; PROFILES=$TEST_ROOT/profiles
 CONFIG_DIR=$TEST_ROOT/config; CONFIG=$CONFIG_DIR/config.json; MARKER=$STATE/installed
 start_telegram_monitor() { :; }
-enable_profile socks5 off global
+apply_profile socks5 off global
 '''
         return subprocess.run(['bash','-c',script],capture_output=True,text=True,timeout=10,env=dict(os.environ,TEST_ROOT=str(self.root),PATH=str(self.root/'bin')+':'+os.environ['PATH']))
 
@@ -105,6 +105,12 @@ enable_profile socks5 off global
         self.assertEqual({p.name:p.read_bytes() for p in (self.root/'state').iterdir()},self.before)
         self.assertEqual((self.root/'service-active').read_text(),'1')
         self.assertIn('已恢复先前配置',result.stderr)
+
+    def test_deferred_postcheck_rolls_back_but_preserves_keep_node_exit_code(self):
+        (self.root/'defer-post').touch();result=self.run_switch()
+        self.assertEqual(result.returncode,75,result.stderr)
+        self.assertEqual((self.root/'config/config.json').read_text(),'old-config')
+        self.assertEqual({p.name:p.read_bytes() for p in (self.root/'state').iterdir()},self.before)
 
     def test_precheck_failure_never_restarts_original_service(self):
         (self.root/'fail-pre').touch();result=self.run_switch()
