@@ -16,6 +16,12 @@ bash <(curl -fsSL https://raw.githubusercontent.com/coexacx/singbox-manager/main
 
 菜单功能、节点字段和运行机制详见 [使用说明](singbox-manager/README.md)。仓库只包含空白节点模板；节点资料和 Telegram 配置保存在部署服务器的 `/etc/sing-box/manager/` 中。
 
+## 多节点管理
+
+选择 **17** 进入多节点菜单。将配置放入 `/etc/sing-box/manager/nodes.txt`，每个节点前单独写一行数字编号；参见 [编号格式示例](singbox-manager/nodes.example.txt)。支持 WireGuard `.conf`、HTTPS/SOCKS5/SS 链接及单节点 JSON，导入后测试出口并按中文地理位置命名。WireGuard 缺少 DNS/MTU 时默认使用 `1.1.1.1` / `1280`。
+
+可查看、编辑、改名、删除或手动连接节点，也可开启自动连接：先选 HTTP 实测延迟最低的可用节点；连接正常时保持当前节点，只有故障时才切换。每 30 分钟检测全部节点，每轮失败重试 3 次；默认连续 3 轮失败后删除，成功会清零。子菜单 10 可设为 1 轮删除。手动停止代理会关闭自动连接，节点巡检继续运行。
+
 ## 仓库结构
 
 - `singbox.sh`：菜单入口与安装器。
@@ -29,7 +35,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/coexacx/singbox-manager/main
 
 ```bash
 python3 tools/prepare_release.py --repository coexacx/singbox-manager --branch main
-git add singbox.sh singbox-manager packages README.md tools .gitignore
+git add singbox.sh singbox-manager packages README.md tools tests .gitignore
 git commit -m "Update sing-box manager"
 git push origin main
 ```

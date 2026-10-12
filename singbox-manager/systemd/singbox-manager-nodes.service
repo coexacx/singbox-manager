@@ -1,0 +1,11 @@
+[Unit]
+Description=sing-box node health checks and failover
+Wants=network-online.target
+After=network-online.target
+ConditionPathExists=/var/lib/singbox-manager/installed
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/lib/singbox-manager/node_manager.py monitor
+UMask=0077
+TimeoutStartSec=infinity

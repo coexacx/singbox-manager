@@ -35,7 +35,7 @@ def physical_interface():
     return None
 
 
-def probe(config_path):
+def probe(config_path, inspector=None, quiet=False):
     full = json.loads(pathlib.Path(config_path).read_text())
     tags = {"https": "https-out", "shadowsocks": "shadowsocks-out", "wg": "surfshark-wg", "socks5": "socks5-out"}
     outbound_tags = [item.get("tag") for item in full.get("outbounds", [])]
@@ -97,9 +97,10 @@ def probe(config_path):
                     raise RuntimeError("节点测试监听未就绪")
                 if protocol == "wg":
                     time.sleep(3)
-                info = test_exit_ip(port, protocol)
-                print(f"节点测试通过：经 {protocol} 节点访问 {info['source']}，出口 IP：{info['ip']}")
-                return info["ip"]
+                info = inspector(port) if inspector else test_exit_ip(port, protocol)
+                if not quiet:
+                    print(f"节点测试通过：经 {protocol} 节点访问 {info.get('source', 'HTTP 检测')}，出口 IP：{info.get('ip', '未查询')}")
+                return info if inspector else info["ip"]
             finally:
                 process.terminate()
                 try:

@@ -47,6 +47,8 @@ def validate_sources():
     for path in (ROOT / "singbox-manager").rglob("*"):
         if path.is_symlink():
             raise ValueError(f"不打包符号链接：{path.relative_to(ROOT)}")
+        if path.name in {"node-store.json", "nodes.txt", "telegram.json", "config.json", "1.txt"} or "cesnode" in path.parts:
+            raise ValueError(f"发布目录含运行资料或测试节点文件：{path.relative_to(ROOT)}")
 
 
 def build_archive():
@@ -82,6 +84,9 @@ def main():
         parser.error("branch 只能包含英文字母、数字、下划线、点和连字符")
     validate_sources()
     subprocess.run(["bash", "-n", str(ROOT / "singbox.sh")], check=True)
+    runtime = re.sub(r"^ASSET_(URL|SHA256)=.*$", r"ASSET_\1=runtime_only",
+                     (ROOT / "singbox.sh").read_text(), flags=re.M)
+    (ROOT / "singbox-manager" / "runtime.sh").write_text(runtime)
     base = f"https://raw.githubusercontent.com/{args.repository}/{args.branch}"
     for path in (ROOT / "README.md", ROOT / "singbox-manager" / "README.md"):
         text = path.read_text()

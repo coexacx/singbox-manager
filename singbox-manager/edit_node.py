@@ -33,12 +33,15 @@ FIELDS = {
         ("direct_dns", "直连 DNS IP", False, False),
     ],
     "wg": [
-        ("local_address", "本地地址/CIDR", False, False),
+        ("local_address", "本地地址/CIDR（多个用逗号分隔）", False, False),
         ("private_key", "本机私钥", True, False),
         ("peer_address", "对端域名或 IP", False, False),
         ("peer_port", "对端端口", False, True),
         ("peer_public_key", "对端公钥", False, False),
-        ("mtu", "MTU（必填，建议按服务商参数）", False, True),
+        ("allowed_ips", "允许的目标 CIDR（多个用逗号分隔）", False, False),
+        ("persistent_keepalive", "保活间隔秒数（0 关闭，默认 25）", False, True),
+        ("pre_shared_key", "预共享密钥（可选，输入 - 清空）", True, False),
+        ("mtu", "MTU（默认 1280）", False, True),
         ("dns_server", "隧道内 DNS IP", False, False),
         ("direct_dns", "直连 DNS IP", False, False),
     ],
@@ -57,6 +60,8 @@ def main():
         print("无需认证时用户名和密码均留空。UDP 仅在上游支持 UDP ASSOCIATE 时开启。")
     for key, label, secret, numeric in FIELDS[protocol]:
         current = node.get(key, "")
+        if isinstance(current, list):
+            current = ",".join(current)
         shown = "已填写" if secret and current and "REPLACE_ME" not in str(current) else str(current)
         if key == "udp_enabled":
             shown = "y" if current else "n"
@@ -64,7 +69,11 @@ def main():
         entered = getpass.getpass(prompt) if secret else input(prompt)
         if not entered:
             continue
-        if protocol == "socks5" and key in ("username", "password"):
+        if key == "allowed_ips":
+            node[key] = [item.strip() for item in entered.split(",") if item.strip()]
+        elif key == "pre_shared_key":
+            node[key] = "" if entered == "-" else entered.strip()
+        elif protocol in ("socks5", "https") and key in ("username", "password"):
             node[key] = "" if entered == "-" else entered
         elif key == "udp_enabled":
             if entered.lower() not in ("y", "yes", "true", "1", "n", "no", "false", "0"):

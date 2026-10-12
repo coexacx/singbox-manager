@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
-ASSET_URL=https://raw.githubusercontent.com/coexacx/singbox-manager/main/packages/singbox-assets-e624d843f1ec6c4e.tar.gz
-ASSET_SHA256=e624d843f1ec6c4e4a381f51b873ed59ca68b2499909b0467877fe39b9198701
+ASSET_URL=https://raw.githubusercontent.com/coexacx/singbox-manager/main/packages/singbox-assets-b3a0fff0ca786287.tar.gz
+ASSET_SHA256=b3a0fff0ca786287e4970aadd82153d31a3fbb737022a651af89139039eaa34a
 LIB=/usr/local/lib/singbox-manager
 STATE=/var/lib/singbox-manager
 CONFIG_DIR=/etc/sing-box
@@ -14,7 +14,10 @@ error() { printf '错误：%s\n' "$*" >&2; }
 remove_file() { [[ ! -e $1 ]] || unlink -- "$1"; }
 require_install() {
   [[ -e $MARKER ]] || { error '请先选择 1 安装。'; return 1; }
-  [[ -f $LIB/API_VERSION && $(cat "$LIB/API_VERSION") == 2 ]] || { error '管理器需要更新，请先选择 1；现有节点资料会保留。'; return 1; }
+  [[ -f $LIB/API_VERSION && $(cat "$LIB/API_VERSION") == 3 ]] || { error '管理器需要更新，请先选择 1；现有节点资料会保留。'; return 1; }
+}
+locked_action() {
+  ( flock -w 5 9 || { error '节点检测或切换正在进行，请稍后重试。'; return 1; }; "$@"; ) 9>/run/lock/singbox-manager.lock
 }
 package_installed() { dpkg-query -s sing-box 2>/dev/null | grep -q '^Status: install ok installed$'; }
 current_tun_mode() { [[ -f $STATE/tun_mode && $(cat "$STATE/tun_mode") == off ]] && printf off || printf on; }
@@ -86,6 +89,8 @@ EOF
   install -d -m 0750 "$PROFILES"; chown root:sing-box "$PROFILES"
   install -m 0644 "$LIB/systemd/singbox-manager-telegram.service" /etc/systemd/system/singbox-manager-telegram.service
   install -m 0644 "$LIB/systemd/singbox-manager-telegram.timer" /etc/systemd/system/singbox-manager-telegram.timer
+  install -m 0644 "$LIB/systemd/singbox-manager-nodes.service" /etc/systemd/system/singbox-manager-nodes.service
+  install -m 0644 "$LIB/systemd/singbox-manager-nodes.timer" /etc/systemd/system/singbox-manager-nodes.timer
   install -d -m 0755 /etc/systemd/system/sing-box.service.d
   if [[ ! -f $STATE/dropin_recorded ]]; then
     if [[ -e /etc/systemd/system/sing-box.service.d/99-split-manager.conf ]]; then
@@ -109,6 +114,11 @@ EOF
   for protocol in https shadowsocks wg socks5; do
     if [[ ! -f $PROFILES/$protocol.json ]]; then install -m 0600 "$LIB/nodes/$protocol.json" "$PROFILES/$protocol.json"; fi
   done
+  if [[ ! -e $PROFILES/nodes.txt ]]; then
+    install -m 0600 "$LIB/nodes.example.txt" "$PROFILES/nodes.txt"
+  fi
+  python3 "$LIB/node_manager.py" init
+  systemctl enable --now singbox-manager-nodes.timer >/dev/null
   if [[ $(sed -n 's/^old_installed=//p' "$STATE/original.state") == 0 && ! -e $STATE/active ]]; then
     systemctl disable --now sing-box.service 2>/dev/null || true
   fi
@@ -165,14 +175,15 @@ restore_previous() {
 
 enable_profile() {
   local protocol=$1 mode=${2:-$(current_tun_mode)} traffic=${3:-$(current_traffic_mode)} old_mode old_traffic candidate previous was_active was_enabled
+  local node_file=${4:-$PROFILES/$protocol.json}
   require_install || return 1
   [[ -f $PROFILES/$protocol.json && -f $LIB/templates/$protocol.json ]] || { error '此协议模板尚未安装，请先选择 1 更新管理器。'; return 1; }
   old_mode=$(current_tun_mode)
   old_traffic=$(current_traffic_mode)
   candidate=$(mktemp "$CONFIG_DIR/.candidate.XXXXXXXX")
   previous=$(mktemp "$CONFIG_DIR/.previous.XXXXXXXX")
-  if ! python3 "$LIB/render.py" "$PROFILES/$protocol.json" "$LIB/templates" "$candidate" "$mode" "$traffic"; then
-    error '节点信息不完整或格式错误。WireGuard 必须填写 MTU。'
+  if ! python3 "$LIB/render.py" "$node_file" "$LIB/templates" "$candidate" "$mode" "$traffic"; then
+    error '节点信息不完整或格式错误。WireGuard 默认 MTU 为 1280。'
     remove_file "$candidate"; remove_file "$previous"; return 1
   fi
   if ! sing-box check -c "$candidate"; then
@@ -213,6 +224,16 @@ enable_profile() {
     say "已启用 $protocol（TUN $mode · 分流代理）；其他未命中规则的流量直连。"
   fi
   start_telegram_monitor
+}
+
+manual_enable() {
+  enable_profile "$@" || return 1
+  python3 "$LIB/node_manager.py" manual
+}
+
+manual_disable() {
+  disable_proxy || return 1
+  python3 "$LIB/node_manager.py" manual
 }
 
 toggle_tun() {
@@ -275,6 +296,10 @@ uninstall_manager() {
   local old_installed old_active old_enabled had_config repo_created key_created
   require_install || return 1
   . "$STATE/original.state"
+  systemctl disable --now singbox-manager-nodes.timer 2>/dev/null || true
+  systemctl stop singbox-manager-nodes.service 2>/dev/null || true
+  remove_file /etc/systemd/system/singbox-manager-nodes.timer
+  remove_file /etc/systemd/system/singbox-manager-nodes.service
   systemctl disable --now singbox-manager-telegram.timer 2>/dev/null || true
   systemctl stop singbox-manager-telegram.service 2>/dev/null || true
   remove_file /etc/systemd/system/singbox-manager-telegram.timer
@@ -341,6 +366,9 @@ show_menu() {
   printf '  %b流量模式%b %s\n' "$dim" "$reset" "$traffic"
   printf '  %b代理出口 IP%b %b%s%b\n' "$dim" "$reset" "$green" "$exit_ip" "$reset"
   printf '  %bTelegram 监测%b %s\n' "$dim" "$reset" "$telegram"
+  if [[ -f $LIB/node_manager.py && -e $MARKER ]]; then
+    printf '  多节点 %s\n' "$(python3 "$LIB/node_manager.py" summary 2>/dev/null || printf '未初始化')"
+  fi
   printf '%b  ── 安装与节点 ──────────────────────────────%b\n' "$dim" "$reset"
   printf '   %b01%b  安装 / 更新 sing-box 与四种分流模板\n' "$accent" "$reset"
   printf '   %b02%b  编辑 HTTPS 代理节点\n' "$accent" "$reset"
@@ -359,33 +387,46 @@ show_menu() {
   printf '   %b11%b  开启 / 关闭 TUN（自动切换透明代理）\n' "$accent" "$reset"
   printf '   %b12%b  配置 Telegram Bot 定时监测\n' "$accent" "$reset"
   printf '   %b16%b  切换分流 / 全局模式\n' "$accent" "$reset"
+  printf '   %b17%b  多节点管理 / 批量转换 / 自动连接\n' "$accent" "$reset"
   printf '   %b13%b  退出\n\n' "$accent" "$reset"
 }
 
 main() {
   local choice
+  if [[ ${1:-} == --activate-node ]]; then
+    [[ $EUID -eq 0 && $# -eq 2 ]] || return 1
+    local protocol
+    protocol=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["protocol"])' "$2")
+    enable_profile "$protocol" "$(current_tun_mode)" "$(current_traffic_mode)" "$2"
+    return $?
+  elif [[ ${1:-} == --stop-node ]]; then
+    [[ $EUID -eq 0 ]] || return 1
+    disable_proxy
+    return $?
+  fi
   check_host
   while :; do
     show_menu
-    read -r -p '请选择功能 [1-16] › ' choice
+    read -r -p '请选择功能 [1-17] › ' choice
     case "$choice" in
-      1) install_manager || true ;;
-      2) edit_profile https || true ;;
-      3) edit_profile shadowsocks || true ;;
-      4) edit_profile wg || true ;;
-      5) enable_profile https || true ;;
-      6) enable_profile shadowsocks || true ;;
-      7) enable_profile wg || true ;;
-      8) disable_proxy || true ;;
-      9) uninstall_manager || true ;;
-      10) detect_proxy || true ;;
-      11) toggle_tun || true ;;
-      12) configure_telegram || true ;;
+      1) locked_action install_manager || true ;;
+      2) locked_action edit_profile https || true ;;
+      3) locked_action edit_profile shadowsocks || true ;;
+      4) locked_action edit_profile wg || true ;;
+      5) locked_action manual_enable https || true ;;
+      6) locked_action manual_enable shadowsocks || true ;;
+      7) locked_action manual_enable wg || true ;;
+      8) locked_action manual_disable || true ;;
+      9) locked_action uninstall_manager || true ;;
+      10) locked_action detect_proxy || true ;;
+      11) locked_action toggle_tun || true ;;
+      12) locked_action configure_telegram || true ;;
       13) say '已退出。'; return 0 ;;
-      14) edit_profile socks5 || true ;;
-      15) enable_profile socks5 || true ;;
-      16) toggle_traffic_mode || true ;;
-      *) error '请输入 1–16。' ;;
+      14) locked_action edit_profile socks5 || true ;;
+      15) locked_action manual_enable socks5 || true ;;
+      16) locked_action toggle_traffic_mode || true ;;
+      17) if require_install; then python3 "$LIB/node_manager.py" menu || true; fi ;;
+      *) error '请输入 1–17。' ;;
     esac
     read -r -p '按回车继续…' _
   done

@@ -7,4 +7,6 @@ __pycache__/
 cesnode/
 telegram.json
 config.json
+node-store.json
+nodes.txt
 *.log
