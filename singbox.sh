@@ -2,8 +2,8 @@
 set -Eeuo pipefail
 # Chinese menus, node names and child processes must share one encoding.
 export PYTHONUTF8=1 PYTHONIOENCODING=utf-8
-ASSET_URL=https://raw.githubusercontent.com/coexacx/singbox-manager/main/packages/singbox-assets-402d054f7919e1cb.tar.gz
-ASSET_SHA256=402d054f7919e1cbfcd8e3d31d03f05d638c4fd721e61820a4d5780a79c7c8a0
+ASSET_URL=https://raw.githubusercontent.com/coexacx/singbox-manager/main/packages/singbox-assets-b2681b22140a19b8.tar.gz
+ASSET_SHA256=b2681b22140a19b8c8b433e1ed95f43b58684b128c1492e41b9d8a76c021cdea
 LIB=/usr/local/lib/singbox-manager
 STATE=/var/lib/singbox-manager
 CONFIG_DIR=/etc/sing-box
@@ -16,7 +16,7 @@ error() { printf '错误：%s\n' "$*" >&2; }
 remove_file() { [[ ! -e $1 ]] || unlink -- "$1"; }
 require_install() {
   [[ -e $MARKER ]] || { error '请先选择 1 安装。'; return 1; }
-  [[ -f $LIB/API_VERSION && $(cat "$LIB/API_VERSION") == 6 ]] || { error '管理器需要更新，请先选择 1；现有节点资料会保留。'; return 1; }
+  [[ -f $LIB/API_VERSION && $(cat "$LIB/API_VERSION") == 7 ]] || { error '管理器需要更新，请先选择 1；现有节点资料会保留。'; return 1; }
 }
 locked_action() {
   ( flock -w 5 9 || { error '节点检测或切换正在进行，请稍后重试。'; return 1; }; "$@"; ) 9>/run/lock/singbox-manager.lock
@@ -55,7 +55,7 @@ install_manager() {
     chmod 0600 "$STATE/nft_was_installed"
   fi
   local dependencies=() package
-  for package in ca-certificates curl python3 iproute2 nftables iputils-ping; do
+  for package in ca-certificates curl python3 iproute2 nftables; do
     if ! dpkg-query -s "$package" 2>/dev/null | grep -q '^Status: install ok installed$'; then dependencies+=("$package"); fi
   done
   if [[ ${#dependencies[@]} -gt 0 ]]; then
@@ -85,6 +85,14 @@ EOF
   if [[ $(sha256sum "$archive" | awk '{print $1}') != "$ASSET_SHA256" ]]; then
     remove_file "$archive"; error '部署资源 SHA256 校验失败。'; return 1
   fi
+  # Retire old standby polling before replacing its implementation.
+  timeout 10s systemctl disable --now singbox-manager-nodes.timer 2>/dev/null || true
+  timeout 15s systemctl stop singbox-manager-nodes.service 2>/dev/null || true
+  remove_file /etc/systemd/system/singbox-manager-nodes.timer
+  remove_file /etc/systemd/system/singbox-manager-nodes.service
+  remove_file "$LIB/systemd/singbox-manager-nodes.timer"
+  remove_file "$LIB/systemd/singbox-manager-nodes.service"
+  remove_file "$LIB/transport_probe.py"
   install -d -m 0755 "$LIB"
   if ! tar -xzf "$archive" -C "$LIB" --strip-components=1; then
     remove_file "$archive"; error '部署资源解压失败。'; return 1
@@ -95,8 +103,6 @@ EOF
   install -d -m 0750 "$PROFILES"; chown root:sing-box "$PROFILES"
   install -m 0644 "$LIB/systemd/singbox-manager-telegram.service" /etc/systemd/system/singbox-manager-telegram.service
   install -m 0644 "$LIB/systemd/singbox-manager-telegram.timer" /etc/systemd/system/singbox-manager-telegram.timer
-  install -m 0644 "$LIB/systemd/singbox-manager-nodes.service" /etc/systemd/system/singbox-manager-nodes.service
-  install -m 0644 "$LIB/systemd/singbox-manager-nodes.timer" /etc/systemd/system/singbox-manager-nodes.timer
   install -m 0644 "$LIB/systemd/singbox-manager-watch.service" /etc/systemd/system/singbox-manager-watch.service
   install -m 0644 "$LIB/systemd/singbox-manager-watch.timer" /etc/systemd/system/singbox-manager-watch.timer
   install -d -m 0755 /etc/systemd/system/sing-box.service.d
@@ -124,7 +130,6 @@ EOF
   fi
   python3 "$LIB/probe_policy.py" init
   python3 "$LIB/node_manager.py" init
-  systemctl enable --now singbox-manager-nodes.timer >/dev/null
   systemctl enable --now singbox-manager-watch.timer >/dev/null
   if [[ $(sed -n 's/^old_installed=//p' "$STATE/original.state") == 0 && ! -e $STATE/active ]]; then
     systemctl disable --now sing-box.service 2>/dev/null || true
@@ -323,12 +328,13 @@ disable_proxy() {
   if [[ ${1:-} != keep-monitor ]]; then
     systemctl disable --now singbox-manager-telegram.timer 2>/dev/null || true
   fi
-  timeout -k 3s 30s systemctl disable --now sing-box.service || return 1
-  if command -v resolvectl >/dev/null; then resolvectl flush-caches 2>/dev/null || true; fi
+  timeout -k 3s 30s systemctl disable --now sing-box.service || say '停止命令未正常完成，继续核验服务状态和接管规则…'
+  timeout -k 3s 45s python3 "$LIB/restore_direct.py" || return 1
+  if command -v resolvectl >/dev/null; then timeout 3s resolvectl flush-caches 2>/dev/null || true; fi
   remove_file "$STATE/active"
   remove_file "$STATE/exit_ip"
   remove_file "$STATE/probe-result.json"
-  say '代理已关闭。'
+  say '代理已关闭，已恢复直连。'
 }
 
 detect_proxy() {

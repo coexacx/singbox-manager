@@ -23,7 +23,7 @@ class CoordinatedState(unittest.TestCase):
         isolation = [patch.object(m.policy,'ROOT',self.root/'budget'),
                      patch.object(m.policy,'CONFIG',self.root/'policy.json'),
                      patch.object(m.policy,'operation',side_effect=lambda *a,**k:nullcontext()),
-                     patch.object(m,'stop_runtime')]
+                     patch.object(m,'start_notifications'), patch.object(m,'stop_runtime'), patch.object(m,'require_internet')]
         for item in isolation:
             item.start(); self.addCleanup(item.stop)
         self.mocks=[p.start() for p in self.patches]
@@ -72,7 +72,7 @@ class CoordinatedState(unittest.TestCase):
     def test_auto_connect_never_applies_pending_edits(self):
         self.edit()
         with patch.object(m,'activate',return_value=True) as activate:
-            m.connect_best(self.data)
+            m.connect_next(self.data)
             self.assertFalse(activate.call_args.kwargs['apply_pending'])
 
     def test_inactive_edit_cannot_replace_active_protocol_file(self):
@@ -118,38 +118,14 @@ class CoordinatedState(unittest.TestCase):
             m.manual_stop(self.data)
         self.assertEqual(seen,['stop',(None,False,'stopped'),'timer'])
 
-    def test_failed_first_selection_automatically_tries_inventory(self):
-        self.data.update(active_id=None,auto=False)
-        def recover(data):
-            self.assertTrue(data['auto']);data['active_id']=self.b['id']
-        with patch.object(m,'activate',return_value=False),patch.object(m,'watch',side_effect=recover) as watch:
-            self.assertTrue(m.manual_connect(self.data,self.a['id']))
-        watch.assert_called_once();self.assertEqual(self.data['active_id'],self.b['id'])
 
     def test_watch_keeps_healthy_current_node_even_with_faster_spare(self):
         self.b['latency_ms']=1
-        with patch.object(m,'health',return_value={'latency_ms':100}),patch.object(m,'check_record') as check,patch.object(m,'activate') as activate:
+        with patch.object(m,'health',return_value={'latency_ms':100}),patch.object(m,'activate') as activate:
             m.watch(self.data)
-        check.assert_not_called();activate.assert_not_called()
+        activate.assert_not_called()
         self.assertEqual(self.data['active_id'],self.a['id'])
 
-    def test_watch_retests_spares_sorts_latency_and_skips_failed_activation(self):
-        c=m.new_record(parse_block('socks5://c.example:1080'));c.update(status='alive',latency_ms=1,failures=2)
-        self.data['nodes'].append(c);self.a['failures']=2;self.a['watch_failures']=1
-        def check(record,**kw):
-            self.assertFalse(kw['count_failure'])
-            record.update(status='alive',reachability='reachable',latency_method='tcping',latency_ms=2 if record is self.b else 20)
-        attempted=[]
-        def activate(data,record,**kw):
-            attempted.append(record['id']);self.assertFalse(kw['apply_pending'])
-            if record is self.b:return False
-            data['active_id']=record['id'];return True
-        with patch.object(m,'health',side_effect=RuntimeError('offline')),patch.object(m,'check_record',side_effect=check),patch.object(m,'activate',side_effect=activate):
-            m.watch(self.data)
-        self.assertEqual(attempted,[self.b['id'],c['id']])
-        self.assertEqual(self.data['active_id'],c['id'])
-        self.assertEqual(self.a['failures'],2);self.assertEqual(len(self.data['nodes']),2)
-        self.assertTrue(any(e['kind']=='failover' for e in self.events.call_args.args[1]))
 
     def test_watch_skips_when_user_disabled_auto(self):
         self.data['auto']=False

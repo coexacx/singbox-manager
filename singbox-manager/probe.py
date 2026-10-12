@@ -14,6 +14,7 @@ import os
 from ip_lookup import lookup_proxy_ip
 import probe_policy as policy
 from probe_errors import upstream_restriction
+from direct_network import require_internet
 
 EXIT_IP_FILE = pathlib.Path("/var/lib/singbox-manager/exit_ip")
 RESULT_FILE = EXIT_IP_FILE.with_name("probe-result.json")
@@ -26,7 +27,13 @@ def say(message):
 def test_exit_ip(port, protocol, include_ip=True):
     from node_health import health, chinese_location
     say("  [连通性] 一次 HTTPS 检测，失败才使用备用地址（最多 12 秒）…")
-    info = health(port, attempts=1, timeout=12, progress=lambda text: say("    " + text))
+    try:
+        info = health(port, attempts=1, timeout=12, progress=lambda text: say("    " + text))
+    except policy.Deferred:
+        raise
+    except RuntimeError:
+        require_internet()
+        raise
     if include_ip:
         say("  [出口信息] 查询代理 IP，最多 15 秒…")
         try:
@@ -78,7 +85,7 @@ def probe(config_path, inspector=None, quiet=False):
         },
         "route": {
             "auto_detect_interface": True,
-            "default_mark": hex(__import__("transport_probe").direct_mark()),
+            "default_mark": hex(__import__("direct_network").direct_mark()),
             "default_domain_resolver": "probe-dns",
             "final": tags[protocol],
         },
@@ -99,21 +106,21 @@ def probe(config_path, inspector=None, quiet=False):
         candidate.write_text(json.dumps(config))
         checked = subprocess.run(["sing-box", "check", "-c", str(candidate)], capture_output=True, text=True, timeout=10)
         if checked.returncode:
-            raise RuntimeError("节点测试配置无效：" + checked.stderr.strip()[:500])
+            raise policy.Deferred("节点测试配置无效：" + checked.stderr.strip()[:500])
         with open(pathlib.Path(directory) / "sing-box.log", "w+") as log:
             process = subprocess.Popen(["sing-box", "run", "-c", str(candidate)], stdout=log, stderr=log)
             try:
                 for _ in range(50):
                     if process.poll() is not None:
                         log.seek(0)
-                        raise RuntimeError("节点测试进程启动失败：" + log.read()[:500])
+                        raise policy.Deferred("节点测试进程启动失败：" + log.read()[:500])
                     try:
                         with socket.create_connection(("127.0.0.1", port), timeout=0.1):
                             break
                     except OSError:
                         time.sleep(0.1)
                 else:
-                    raise RuntimeError("节点测试监听未就绪")
+                    raise policy.Deferred("节点测试监听未就绪")
                 if protocol == "wg":
                     time.sleep(3)
                 info = inspector(port) if inspector else test_exit_ip(port, protocol, include_ip=False)

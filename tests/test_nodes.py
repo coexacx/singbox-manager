@@ -72,7 +72,7 @@ class Lifecycle(unittest.TestCase):
         isolation = [patch.object(manager.policy,'ROOT',self.root/'budget'),
                      patch.object(manager.policy,'CONFIG',self.root/'policy.json'),
                      patch.object(manager.policy,'operation',side_effect=lambda *a,**k:nullcontext()),
-                     patch.object(manager,'stop_runtime')]
+                     patch.object(manager,'start_notifications'), patch.object(manager,'stop_runtime'), patch.object(manager,'require_internet')]
         for item in isolation:
             item.start(); self.addCleanup(item.stop)
         for item in self.patches:
@@ -89,41 +89,29 @@ class Lifecycle(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_healthy_active_node_is_sticky(self):
-        with patch.object(manager, 'check_record'), patch.object(manager, 'activate') as activate:
+        with patch.object(manager, 'activate') as activate:
             manager.scan(self.data, scheduled=True)
             activate.assert_not_called()
         self.assertEqual(self.data['active_id'], self.a['id'])
 
-    def test_fastest_initial_selection_and_failed_connect_fallback(self):
+    def test_list_order_initial_selection_and_failed_connect_fallback(self):
         self.data['active_id'] = None
         with patch.object(manager, 'activate', side_effect=[False, True]) as activate:
-            self.assertTrue(manager.connect_best(self.data))
-            self.assertEqual([c.args[1]['id'] for c in activate.call_args_list], [self.b['id'], self.a['id']])
+            self.assertTrue(manager.connect_next(self.data))
+            self.assertEqual([c.args[1]['id'] for c in activate.call_args_list], [self.a['id'], self.b['id']])
 
     def test_confirmed_active_failure_deletes_and_fails_over_only_in_auto_mode(self):
         self.a['watch_failures'] = 1
-        with patch.object(manager, 'health',side_effect=RuntimeError('offline')), patch.object(manager, 'connect_best', return_value=True) as connect:
+        with patch.object(manager, 'health',side_effect=RuntimeError('offline')), patch.object(manager, 'connect_next', return_value=True) as connect:
             manager.watch(self.data)
-            self.assertEqual(connect.call_args.kwargs['exclude'], self.a['id'])
+            self.assertEqual(connect.call_args.kwargs['start_id'], self.b['id'])
         self.assertNotIn(self.a,self.data['nodes'])
         self.data['auto'] = False
-        with patch.object(manager, 'connect_best') as connect:
+        with patch.object(manager, 'connect_next') as connect:
             manager.watch(self.data)
             connect.assert_not_called()
 
-    def test_first_tcp_failure_deletes_immediately(self):
-        self.data.update(auto=False, active_id=None, nodes=[self.a])
-        self.a['latency_checked_at'] = 0
-        with patch.object(manager, 'test_record', return_value={'reachability':'unreachable','latency_ms':None}):
-            manager.scan(self.data, scheduled=True)
-        self.assertEqual(self.data['nodes'], [])
 
-    def test_reachable_server_does_not_verify_proxy(self):
-        self.a.update(status='unknown',latency_checked_at=0)
-        with patch.object(manager, 'test_record', return_value={'reachability':'reachable','latency_ms':10}):
-            manager.check_record(self.a)
-        self.assertEqual(self.a['status'],'unknown')
-        self.assertEqual(self.a['latency_ms'],10)
 
     def test_failed_activation_preserves_existing_selected_node_and_profile(self):
         path = self.root/'socks5.json'
@@ -138,7 +126,7 @@ class Lifecycle(unittest.TestCase):
     def test_import_deduplicates_and_private_database_mode(self):
         path = self.root/'input.txt'
         path.write_text('1\nsocks5://c.example:1080\n2\nsocks5://c.example:1080')
-        with patch.object(manager, 'check_record'):
+        with patch('socket.socket', side_effect=AssertionError('import must be offline')):
             manager.import_file(self.data, path)
         self.assertEqual(len(self.data['nodes']), 3)
         self.assertEqual(manager.DATABASE.stat().st_mode & 0o777, 0o600)

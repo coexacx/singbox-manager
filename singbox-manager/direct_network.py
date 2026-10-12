@@ -1,10 +1,7 @@
-"""Direct, unauthenticated TCP connect / ICMP measurements only."""
-import errno
+"""Direct networking used only to distinguish local outages from proxy failure."""
 import ipaddress
 import json
-import os
 from pathlib import Path
-import re
 import secrets
 import socket
 import struct
@@ -108,43 +105,39 @@ def resolve(host):
     raise OSError('节点域名直连解析失败')
 
 
-def measure(node):
-    wg = node['protocol'] == 'wg'
-    host = node['peer_address'] if wg else node['server']
-    port = int(node['peer_port'] if wg else node['server_port'])
-    method = 'ping' if wg else 'tcping'
-    base = {'latency_method': method, 'latency_ms': None, 'latency_checked_at': int(time.time())}
+
+def require_internet():
+    """Never delete nodes while direct Internet health is unknown."""
+    import ssl
+    from deadline import deadline
+    from probe_policy import Deferred
     try:
-        addresses = resolve(host)
-    except (OSError, ValueError, subprocess.SubprocessError):
-        return dict(base, reachability='unknown', transport_error='直连 DNS 或路由暂不可用')
-    for address in addresses:
-        family = socket.AF_INET6 if ':' in address else socket.AF_INET
-        try:
-            if wg:
-                command = ['ping', '-6' if family == socket.AF_INET6 else '-4', '-n', '-c', '1', '-W', '2',
-                           '-I', interface(family), '-m', str(direct_mark()), address]
-                result = subprocess.run(command, capture_output=True, text=True, timeout=4,
-                                        env=dict(os.environ, LC_ALL='C'))
-                found = re.search(r'time[=<]([\d.]+)\s*ms', result.stdout)
-                if result.returncode == 0 and found:
-                    return dict(base, reachability='reachable', latency_ms=float(found[1]))
-            else:
+        with deadline(24):
+            for host in ('www.gstatic.com', 'cp.cloudflare.com'):
                 try:
-                    connection = direct_socket(family, socket.SOCK_STREAM)
+                    addresses = resolve(host)
                 except (OSError, ValueError, subprocess.SubprocessError):
-                    return dict(base, reachability='unknown', transport_error='本机直连路由或标记暂不可用')
-                with connection as sock:
-                    sock.settimeout(3)
-                    start = time.monotonic()
-                    sock.connect((address, port))
-                    # Deliberately no send(), TLS, proxy authentication or HTTP.
-                    return dict(base, reachability='reachable', latency_ms=round((time.monotonic()-start)*1000, 2))
-        except OSError as exc:
-            if exc.errno in (errno.ENETUNREACH, errno.EPERM, errno.EACCES, errno.ENODEV):
-                return dict(base, reachability='unknown', transport_error='本机直连网络暂不可用')
-            continue
-        except subprocess.SubprocessError:
-            continue
-    return dict(base, reachability='unknown' if wg else 'unreachable',
-                transport_error='未收到 ICMP 回复（不能据此判死）' if wg else 'TCP 握手失败')
+                    continue
+                for address in addresses[:1]:
+                    try:
+                        family = socket.AF_INET6 if ':' in address else socket.AF_INET
+                        with direct_socket(family, socket.SOCK_STREAM) as raw:
+                            raw.settimeout(4)
+                            raw.connect((address, 443))
+                            with ssl.create_default_context().wrap_socket(raw, server_hostname=host) as sock:
+                                sock.sendall(('GET /generate_204 HTTP/1.1\r\nHost: '+host+'\r\nConnection: close\r\n\r\n').encode())
+                                response = b''
+                                while b'\r\n' not in response and len(response)<4096:
+                                    chunk = sock.recv(512)
+                                    if not chunk:
+                                        break
+                                    response += chunk
+                                if response.split(b'\r\n',1)[0].split()[1:2] == [b'204']:
+                                    return
+                    except TimeoutError:
+                        raise
+                    except (OSError, ValueError, subprocess.SubprocessError):
+                        continue
+    except TimeoutError:
+        pass
+    raise Deferred('本机直连网络或检测网站暂不可用，保留所有节点', time.time()+180, 'local')

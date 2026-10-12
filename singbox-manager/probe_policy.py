@@ -17,7 +17,7 @@ CONFIG = Path('/etc/sing-box/manager/probe-policy.json')
 ROOT = Path('/var/lib/singbox-manager-budget')
 DEFAULTS = {'connect_gap': 15, 'request_gap': 2, 'hourly_budget': 180,
             'cache_ttl': 120, 'provider_cooldown': 3600,
-            'standby_interval': 1800, 'standby_gap': 60, 'transport_gap': 2, 'transport_cache_ttl': 300, 'transport_hourly_budget': 600}
+            'active_interval': 180}
 
 class Deferred(RuntimeError):
     def __init__(self, message, retry_at=None, category='budget'):
@@ -32,7 +32,7 @@ class Restricted(Deferred):
 def settings():
     data = dict(DEFAULTS)
     if CONFIG.exists():
-        data.update(json.loads(CONFIG.read_text()))
+        data.update({k:v for k,v in json.loads(CONFIG.read_text()).items() if k in DEFAULTS})
     for key in DEFAULTS:
         if not isinstance(data[key], int) or not 1 <= data[key] <= 604800:
             raise ValueError('检测策略数值无效：' + key)
@@ -87,7 +87,7 @@ def transact(state,request,config,now):
         state['cooldown_reason']=str(request.get('reason','上游拒绝检测'))[:120]
         return {'ok':True,'retry_at':state['cooldown_until']}
     if op=='status':
-        return {k:state.get(k) for k in ('cooldown_until','cooldown_reason','last_new_session')}
+        return {k:state.get(k) for k in ('cooldown_until','cooldown_reason','last_new_session','deferred_until')}
     if op!='claim' or request.get('kind') not in ('current','connect','metadata'):
         raise ValueError('无效的检测额度请求')
     kind=request['kind']
@@ -106,7 +106,9 @@ def transact(state,request,config,now):
         if state.get('last_new_session',0)+gap>now:wait.append((state['last_new_session']+gap,'新建检测会话间隔限制'))
     if wait:
         until,reason=max(wait)
+        state['deferred_until']=until
         return {'ok':False,'retry_at':until,'reason':reason}
+    state.pop('deferred_until',None)
     token=secrets.token_hex(16)
     state['history'].extend([now]*cost)
     state['last_request']=now
@@ -145,22 +147,6 @@ def operation(kind, wait=False):
         except (Deferred,OSError):pass
 
 
-def transport_slot():
-    config=settings()
-    with state_file('transport.json') as state:
-        now=time.time()
-        history=[stamp for stamp in state.get('history',[]) if now-stamp<3600]
-        if len(history)>=config['transport_hourly_budget']:
-            raise Deferred('本机 TCPing/Ping 每小时检测额度用完',history[0]+3600)
-        delay=max(0,state.get('last',0)+config['transport_gap']-now)
-        if delay>60:
-            raise Deferred('本机测速间隔尚未到',now+delay)
-        time.sleep(delay)
-        now=time.time()
-        state['last']=now
-        state['history']=history+[now]
-
-
 def cache_get(key,max_age=None):
     with state_file('cache.json') as data:
         item=data.get('nodes',{}).get(key,{})
@@ -194,8 +180,10 @@ def init():
     ROOT.mkdir(parents=True,exist_ok=True)
     ROOT.chmod(0o2770)
     if os.geteuid()==0:os.chown(ROOT,0,grp.getgrnam('sing-box').gr_gid)
-    if not CONFIG.exists():
-        atomic(CONFIG,DEFAULTS);CONFIG.chmod(0o640)
+    atomic(CONFIG, settings())
+    CONFIG.chmod(0o640)
+    (ROOT/'transport.json').unlink(missing_ok=True)
+    (ROOT/'transport.json.lock').unlink(missing_ok=True)
     with state_file('budget.json'):pass
     with state_file('cache.json'):pass
 

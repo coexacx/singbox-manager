@@ -53,7 +53,9 @@ def health(port, attempts=1, timeout=12, progress=None):
                 target_problem = True
             except Restricted:
                 raise
-            except (ValueError, OSError, RuntimeError, subprocess.TimeoutExpired):
+            except (ValueError, OSError):
+                raise Deferred('本机 HTTPS 检测工具或响应解析异常，保留节点', time.time()+180, 'local') from None
+            except (RuntimeError, subprocess.TimeoutExpired):
                 pass
         if attempt + 1 < attempts:
             time.sleep(min(1, max(0, deadline - time.monotonic())))

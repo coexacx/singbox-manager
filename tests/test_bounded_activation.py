@@ -23,7 +23,7 @@ class ProbeBounds(unittest.TestCase):
         self.assertIn('稍后监测会重试',output.getvalue())
 
     def test_broken_https_still_rejects_node(self):
-        with patch('node_health.health',side_effect=RuntimeError('offline')),patch.object(probe,'lookup_proxy_ip') as lookup,redirect_stdout(io.StringIO()):
+        with patch('node_health.health',side_effect=RuntimeError('offline')),patch.object(probe,'require_internet'),patch.object(probe,'lookup_proxy_ip') as lookup,redirect_stdout(io.StringIO()):
             with self.assertRaises(RuntimeError):probe.test_exit_ip(18081,'socks5')
             lookup.assert_not_called()
 
@@ -54,7 +54,7 @@ class ShellTransaction(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory();self.root=Path(self.tmp.name)
         for folder in ('lib/templates','profiles','state','bin','config'): (self.root/folder).mkdir(parents=True)
-        (self.root/'lib/API_VERSION').write_text('6')
+        (self.root/'lib/API_VERSION').write_text('7')
         (self.root/'lib/templates/socks5.json').write_text('{}')
         (self.root/'profiles/socks5.json').write_text('{}')
         (self.root/'state/installed').touch()

@@ -29,7 +29,7 @@ class Notifications(unittest.TestCase):
         isolation = [patch.object(manager.policy,'ROOT',self.root/'budget'),
                      patch.object(manager.policy,'CONFIG',self.root/'policy.json'),
                      patch.object(manager.policy,'operation',side_effect=lambda *a,**k:nullcontext()),
-                     patch.object(manager,'stop_runtime')]
+                     patch.object(manager,'start_notifications'), patch.object(manager,'stop_runtime'), patch.object(manager,'require_internet')]
         for item in isolation:
             item.start(); self.addCleanup(item.stop)
         self.mocks = [item.start() for item in self.patches]
@@ -80,24 +80,9 @@ class Notifications(unittest.TestCase):
     def test_failed_candidate_is_in_successful_fallback_event(self):
         events=[]
         with patch.object(manager,'activate',side_effect=[False,True]):
-            manager.connect_best(self.data,events=events)
-        self.assertEqual(events[0]['failed'],['新加坡'])
+            manager.connect_next(self.data,events=events)
+        self.assertEqual(events[0]['failed'],['日本-东京'])
 
-    def test_immediate_deletion_and_outage_dedup_then_recovery(self):
-        self.data.update(nodes=[self.a],auto=False,active_id=None)
-        self.a['latency_checked_at']=0
-        captured=[]
-        self.sender.side_effect=lambda **kwargs: captured.extend(copy.deepcopy(kwargs['events']))
-        with patch.object(manager,'test_record',return_value={'reachability':'unreachable','latency_ms':None}):
-            manager.scan(self.data,scheduled=True)
-            manager.scan(self.data,scheduled=True)
-        self.assertEqual([e['kind'] for e in captured],['deleted','all_unavailable'])
-        self.assertEqual(captured[0]['deleted'],[{'name':'日本-东京','failures':0}])
-        self.data['nodes']=[self.b]
-        with patch.object(manager,'check_record'):
-            manager.scan(self.data)
-        self.assertEqual(captured[-1]['kind'],'recovered')
-        self.assertFalse(self.data['availability_alert'])
 
     def test_send_failure_retained_and_retried_without_connection_rollback(self):
         self.sender.side_effect=ValueError('simulate failed API')
@@ -110,14 +95,6 @@ class Notifications(unittest.TestCase):
         self.assertEqual(self.data['pending_notifications'],[])
         self.assertEqual(self.sender.call_count,2)
 
-    def test_scan_does_not_publish_incomplete_inventory(self):
-        manager.save(self.data)
-        before=(self.root/'node-summary.json').read_bytes()
-        def check(record,**kwargs):
-            self.assertEqual((self.root/'node-summary.json').read_bytes(),before)
-            record['latency_ms']=5
-        with patch.object(manager,'check_record',side_effect=check):
-            manager.scan(self.data,scheduled=True)
 
 
 class TelegramFormatting(unittest.TestCase):

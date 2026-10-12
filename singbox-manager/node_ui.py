@@ -60,10 +60,7 @@ class View:
             status, color = {"alive": ("代理已验证", "green"), "dead": ("失败", "red")}.get(record.get("status"), ("代理未验证", "yellow"))
             self.text(f"{index + 1:02d} {'▶ ' if current else ''}{record.get('custom_name') or record.get('name', '未命名')}", "white" if current else None)
             protocol = PROTOCOLS.get(record.get("node", {}).get("protocol"), "未知")
-            latency = f"{record.get('latency_method') or '待测速'} {record['latency_ms']} ms" if record.get("latency_ms") is not None else "待检测"
-            self.text(f"   {protocol} · {status} · {latency}", color)
-            reach = {'reachable':'服务器可达', 'unreachable':'TCP 不可达'}.get(record.get('reachability'), '服务器延迟未知')
-            self.text('   ' + reach, 'dim')
+            self.text(f"   {protocol} · {status}" + (' · 备用（不检测）' if not current else ''), color)
             self.text(f"   出口 {record.get('ip') or '待查询'}" + (" · 当前节点" if current else ""), "dim")
             if record.get("pending_node"):
                 self.text("   有待应用修改 · 手动连接成功后生效", "yellow")
@@ -84,13 +81,15 @@ def render_inventory(data, page=0, width=None, color=None):
     view.title("多节点管理 · NODE CENTER")
     view.text("当前节点  " + current, "green" if data.get("active_id") else "dim")
     view.text(f"连接方式  {'自动 · 当前节点正常时保持连接' if data.get('auto') else '手动 · 故障时不自动切换'}")
-    view.text(f"节点总览  {len(nodes)} 个 / 存活 {alive} / 失败 {dead} / 未检测 {len(nodes)-alive-dead}")
-    view.text('备用巡检  分散轮询，每次一个；TCP 或实际连接失败立即清除', 'dim')
-    view.text("连接检查  每分钟调度 · 成功缓存 2 分钟；失败用第二地址复核", "dim")
-    view.text('选择规则  TCPing/Ping 升序；实际连接失败立即删除并尝试下一个', 'dim')
-    view.text('WG 未回复 ping：延迟未知、最后尝试，不因 ping 失败删除', 'dim')
-    when = time.strftime("%m-%d %H:%M:%S", time.localtime(data["last_scan"])) if data.get("last_scan") else "尚未完成"
-    view.text("上次巡检  " + when, "dim")
+    view.text(f"节点总览  {len(nodes)} 个 / 已验证 {alive} / 失败 {dead} / 未验证 {len(nodes)-alive-dead}")
+    view.text('备用节点  不测速、不进行代理认证，仅连接时验证', 'dim')
+    view.text('当前检测  默认每 3 分钟；失败用第二地址复核', 'dim')
+    view.text('连接顺序  按列表依次尝试，实际连接失败立即删除', 'dim')
+    view.text('全部失败  停止 sing-box、恢复直连并发送通知', 'dim')
+    if data.get('direct_restore_pending'):
+        view.text('恢复直连尚未完成，后台正在重试清理', 'red')
+    elif data.get('exhausted'):
+        view.text('节点已耗尽，当前为直连；请添加并选择新节点', 'yellow')
     page, pages = view.cards(nodes, data.get("active_id"), page)
     if pages > 1:
         view.text("11 上一页   12 下一页 · 节点编号跨页保持一致", "cyan")
@@ -98,7 +97,7 @@ def render_inventory(data, page=0, width=None, color=None):
     for line in ("01 批量导入       02 查看节点", "03 编辑节点       09 修改名称", "08 删除节点"):
         view.text(line)
     view.section("连接与巡检")
-    for line in ("04 选定节点并开启故障切换", "05 按 TCPing/Ping 自动连接", "06 关闭自动连接   07 全部服务器测速（不认证）", "10 设置备用节点复测间隔", "00 返回主菜单"):
+    for line in ("04 选定节点并开启故障切换", "05 按列表顺序自动连接", "06 关闭自动连接   07 检测当前连接", "10 设置当前连接检测间隔", "00 返回主菜单"):
         view.text(line, "cyan" if line.startswith("00") else None)
     view.text()
     return "\n".join(view.lines)

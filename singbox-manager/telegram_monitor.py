@@ -253,6 +253,32 @@ def load_summary():
         return None
 
 
+def abnormal_events(events):
+    kinds = {'connect_failed', 'stop_failed', 'mode_failed', 'all_unavailable',
+             'direct_fallback', 'direct_restore_failed', 'failover', 'probe_deferred'}
+    return any(e.get('kind') in kinds or e.get('failed') or
+               (e.get('kind') == 'deleted' and e.get('reason') != '用户手动删除')
+               for e in (events or []))
+
+
+def pin_alert(data, message_id):
+    """A pin failure must never turn an already delivered alert into a resend."""
+    if not message_id:
+        return False
+    try:
+        with deadline(5):
+            bot_api(data['token'], 'pinChatMessage', {'chat_id': data['chat_id'],
+                    'message_id': message_id, 'disable_notification': 'false'})
+        print(f'Telegram 异常告警已置顶：消息 ID {message_id}', flush=True)
+        return True
+    except (ValueError, OSError, TimeoutError) as exc:
+        # Telegram descriptions are useful for missing rights, but may contain
+        # supplied values. Never print the configured token in any error path.
+        detail = str(exc).replace(str(data.get('token', '')), '[已隐藏]')[:180]
+        print(f'Telegram 告警已送达，但置顶失败：{detail}；请检查 Bot 置顶权限或网络。', flush=True)
+        return False
+
+
 def notify(event="periodic", snapshot=None, events=None):
     data = load_config()
     if not configured():
@@ -279,8 +305,13 @@ def notify(event="periodic", snapshot=None, events=None):
         status = "异常（节点库无可用节点）"
     elif special:
         status = "事件通知；内核" + ("运行中" if active == "active" else "未运行")
-    warning = unavailable or active != "active" or (not special and not info) or any(
-        item.get("kind") in ("connect_failed", "stop_failed", "mode_failed") for item in (events or []))
+    warning = unavailable or active != "active" or (not special and not info) or abnormal_events(events)
+    if (snapshot or {}).get('direct_restored') and active != 'active':
+        status = '全部节点失效，sing-box 已停止，已恢复直连'
+        protocol, tun, traffic = '未启用', '关闭', '直连'
+        info = None
+    elif (snapshot or {}).get('direct_restore_pending'):
+        status = '全部节点失效，恢复直连未完成，正在重试清理'
     stopped = bool(events and events[-1].get("kind") == "stopped" and active != "active")
     if stopped:
         status = "代理已手动关闭"
@@ -315,6 +346,10 @@ def notify(event="periodic", snapshot=None, events=None):
         prefix = f"[{index}/{len(chunks)}] " if len(chunks) > 1 else ""
         result = bot_api(data["token"], "sendMessage", {"chat_id": data["chat_id"], "text": prefix + chunk})
         message_ids.append(result.get("message_id"))
+    if warning and not stopped and message_ids:
+        # Pin the first part containing the incident summary, not a continuation
+        # containing only inventory rows. Existing pins are left untouched.
+        pin_alert(data, message_ids[0])
     print(f"Telegram 通知已发送：{status}；消息 ID {','.join(map(str, message_ids))}", flush=True)
     return message_ids
 

@@ -17,7 +17,7 @@ import time
 from node_formats import normalize, parse_numbered
 from node_health import health, chinese_location
 import probe_policy as policy
-from transport_probe import measure
+from direct_network import require_internet
 from probe_errors import upstream_restriction
 from render import render
 from node_notifications import public_snapshot
@@ -59,23 +59,21 @@ def write_json(path, data, shared=False):
 
 def load():
     if not DATABASE.exists():
-        return {"version": 1, "latency_schema": "transport-v1", "nodes": [], "auto": False, "active_id": None}
+        return {"version": 1, "selection_policy": "sequential-v1", "nodes": [], "auto": False, "active_id": None}
     data = json.loads(DATABASE.read_text())
     if data.get("version") != 1 or not isinstance(data.get("nodes"), list):
         raise ValueError("节点数据库格式无效，请检查备份")
-    if data.get('latency_schema') != 'transport-v1':
+    if data.get('selection_policy') != 'sequential-v1':
         for record in data['nodes']:
-            record['http_latency_ms'] = record.get('latency_ms')
-            record.update(latency_ms=None, latency_method=None, latency_checked_at=None, reachability='unknown', failures=0)
-        data['latency_schema'] = 'transport-v1'
-    if data.get('failure_policy') != 'immediate-v1':
-        # Old full-proxy scans may have failed because the account or an IP API
-        # was rate limited. Their historical failures are not fresh evidence.
-        for record in data['nodes']:
+            for key in ('latency_ms', 'latency_method', 'latency_checked_at', 'reachability',
+                        'transport_error', 'transport_deferred', 'failures', 'watch_failures'):
+                record.pop(key, None)
             if record.get('status') == 'dead':
                 record.update(status='unknown', proxy_checked_at=0)
                 record.pop('error', None)
-        data['failure_policy'] = 'immediate-v1'
+        for key in ('latency_schema', 'failure_policy', 'last_standby_check', 'last_scan', 'delete_after'):
+            data.pop(key, None)
+        data['selection_policy'] = 'sequential-v1'
     return data
 
 
@@ -124,10 +122,7 @@ def active_name(data):
 
 def availability_events(data):
     previously = bool(data.get("availability_alert"))
-    unavailable = not any(
-        (r['id'] == data.get('active_id') and r['status'] == 'alive')
-        or (r.get('reachability', 'unknown') != 'unreachable' and r['status'] != 'dead')
-        for r in data['nodes'])
+    unavailable = bool(data.get('exhausted')) or not data['nodes']
     # Empty inventories only alert if automatic connection was requested or
     # this is the continuation of an existing outage.
     unavailable = unavailable and bool(data["nodes"] or data.get("auto") or data.get("had_nodes") or previously)
@@ -172,8 +167,8 @@ def new_record(node, number=""):
     identity = fingerprint(node)
     return {"id": identity[:12], "fingerprint": identity, "node": node,
             "name": f"位置待查询-{LABELS[node['protocol']]}-{identity[:6]}",
-            "source_number": str(number), "status": "unknown", "failures": 0,
-            "latency_ms": None, "checked_at": None, "created_at": int(time.time())}
+            "source_number": str(number), "status": "unknown",
+            "checked_at": None, "created_at": int(time.time())}
 
 
 def unique_record(data, node, number=""):
@@ -194,44 +189,6 @@ def active_protocol():
 
 def running():
     return subprocess.run(["systemctl", "is-active", "--quiet", "sing-box.service"], timeout=5).returncode == 0
-
-
-def test_record(record, geography=False):
-    policy.transport_slot()
-    return measure(record['node'])
-
-
-def check_record(record, geography=False, count_failure=False):
-    now = time.time()
-    stamp = record.get('latency_checked_at') or 0
-    config = policy.settings()
-    cache_ttl = min(config['transport_cache_ttl'], config['standby_interval'])
-    if 0 <= now-stamp < cache_ttl:
-        record.pop('transport_deferred', None)
-        print(f"{name(record)}：复用近期 {record.get('latency_method') or '服务器'} 测速结果", flush=True)
-        return record.get('reachability') == 'reachable'
-    print(f"正在测量 {name(record)} 的服务器延迟（不进行代理认证）…", flush=True)
-    try:
-        info = test_record(record)
-    except policy.Deferred as exc:
-        record['transport_deferred'] = True
-        record['transport_error'] = str(exc)
-        print(f'测速延后：{exc}；不计失败', flush=True)
-        return None
-    except (ValueError, OSError, RuntimeError, subprocess.SubprocessError):
-        info = {'reachability': 'unknown', 'latency_ms': None, 'transport_error': '测速工具或本机网络暂不可用'}
-    record.pop('transport_deferred', None)
-    record.update(info)
-    record['latency_checked_at'] = now
-    record['latency_method'] = 'ping' if record['node']['protocol'] == 'wg' else 'tcping'
-    reachability = record.get('reachability', 'unknown')
-    if reachability == 'reachable':
-        record['failures'] = 0
-        record.pop('transport_error', None)
-        print(f"{name(record)}：服务器可达，{record['latency_method']} {record['latency_ms']} ms；代理以实际连接为准", flush=True)
-        return True
-    print(f"{name(record)}：{record.get('transport_error', '延迟未知')}", flush=True)
-    return False if reachability == 'unreachable' else None
 
 
 def migrate(data):
@@ -275,14 +232,10 @@ def import_file(data, path):
             print(f"编号 {number}：节点已存在，跳过重复项", flush=True)
             continue
         record = unique_record(data, node, number)
-        print(f"编号 {number}：转换为 {LABELS[node['protocol']]}，正在测量服务器…", flush=True)
-        check_record(record)
-        if record.get('reachability') == 'unreachable':
-            print('TCP 握手失败，已清除本次导入项。', flush=True)
-            continue
+        print(f"编号 {number}：已转换为 {LABELS[node['protocol']]}，等待选择连接", flush=True)
         data["nodes"].append(record)
         save(data)
-    print(f"节点库共 {len(data['nodes'])} 个节点；导入仅测服务器，实际连接后获取出口 IP 与中文名称。")
+    print(f"节点库共 {len(data['nodes'])} 个节点；导入不发起网络请求，实际连接后获取出口 IP 与中文名称。")
 
 
 def select(data, identity):
@@ -292,7 +245,7 @@ def select(data, identity):
     raise ValueError("找不到该节点，请刷新节点列表")
 
 
-def activate(data, record, apply_pending=True):
+def activate(data, record, apply_pending=True, events=None):
     print(f"正在连接 {name(record)}…", flush=True)
     pending = apply_pending and bool(record.get("pending_node"))
     node = record["pending_node"] if pending else record["node"]
@@ -301,12 +254,19 @@ def activate(data, record, apply_pending=True):
         write_json(path, node)
         result = subprocess.run(["bash", str(LIB / "runtime.sh"), "--activate-node", str(path)])
     record.pop('connection_deferred', None)
-    if result.returncode == 75:
+    record.pop('pending_failed', None)
+    if result.returncode in (75, 124, 137):
         record['connection_deferred'] = True
+        try:
+            status = policy.rpc({'op':'status'})
+            data['deferred_until'] = max(time.time()+60, status.get('deferred_until') or 0, status.get('cooldown_until') or 0)
+        except policy.Deferred:
+            data['deferred_until'] = time.time()+180
         print('实际验证暂缓；保留节点，等待本机检测额度或检测网站恢复。', flush=True)
         return False
     if result.returncode:
         if pending:
+            record['pending_failed'] = True
             for key in ('pending_node', 'pending_fingerprint', 'pending_error'):
                 record.pop(key, None)
             print('待应用配置连接失败，已丢弃修改；原有可用节点继续保留。', flush=True)
@@ -315,21 +275,26 @@ def activate(data, record, apply_pending=True):
             record["error"] = "实际连接失败，立即删除"
             remove_records(data, {record['id']})
             save(data)
-            emit_events(data, [{'kind': 'deleted', 'reason': '实际连接失败，立即删除',
-                                'deleted': [{'name': name(record), 'failures': record.get('failures', 0)}]}])
+            event = {'kind': 'deleted', 'reason': '实际连接失败，立即删除',
+                     'deleted': [{'name': name(record)}]}
+            if events is None:
+                emit_events(data, [event])
+            else:
+                events.append(event)
         return False
     if pending:
         commit_node(record, node)
     write_json(PROFILES / f"{node['protocol']}.json", node)
     data["active_id"] = record["id"]
+    for key in ('next_id', 'deferred_until', 'exhausted', 'direct_restored', 'direct_restore_pending'):
+        data.pop(key, None)
     refresh_active(record)
     save(data, publish=False)
     return True
 
 
 def refresh_active(record):
-    record["status"], record["failures"] = "alive", 0
-    record["watch_failures"] = 0
+    record["status"] = "alive"
     record["proxy_checked_at"] = int(time.time())
     record.pop("error", None)
     try:
@@ -353,41 +318,74 @@ def refresh_active(record):
         record['name'] = f"{record['location_zh']}-{LABELS[record['node']['protocol']]}-{record['id'][:6]}"
 
 
-def connect_best(data, exclude=None, events=None, reason="按 TCPing/Ping 延迟选择可用节点"):
-    previous = active_name(data)
+def successor(data, identity):
+    ids = [r['id'] for r in data['nodes']]
+    if identity in ids and len(ids) > 1:
+        return ids[(ids.index(identity) + 1) % len(ids)]
+    return None
+
+
+def restore_direct(data, events):
+    """Suspend exhausted inventories; commit cleanup outcome before notifying."""
+    first = not data.get('exhausted')
+    data.update(auto=False, exhausted=True, availability_alert=True)
+    data.pop('next_id', None)
+    data.pop('deferred_until', None)
+    try:
+        stop_runtime()
+    except (OSError, RuntimeError, subprocess.SubprocessError):
+        was_pending = data.get('direct_restore_pending')
+        data.update(direct_restored=False, direct_restore_pending=True)
+        if first or not was_pending:
+            events.append({'kind': 'direct_restore_failed', 'reason': '全部节点失效；停止服务或清理接管规则未完成，将自动重试清理'})
+    else:
+        changed = not data.get('direct_restored')
+        data.update(active_id=None, direct_restored=True, direct_restore_pending=False)
+        if changed:
+            events.append({'kind': 'direct_fallback', 'reason': '全部节点连接失败，sing-box 已停止，接管规则已清理，已恢复直连；请导入并选择新节点'})
+        print('全部节点失效：sing-box 已停止，已恢复直连；等待添加并选择节点。', flush=True)
+    save(data)
+
+
+def connect_next(data, start_id=None, events=None, reason='按节点列表顺序连接', manual=False, previous=None):
     events = [] if events is None else events
+    previous = active_name(data) if previous is None else previous
+    candidates = list(data['nodes'])
+    start_id = start_id or data.get('next_id')
+    index = next((i for i, r in enumerate(candidates) if r['id'] == start_id), 0)
+    candidates = candidates[index:] + candidates[:index]
     failed = []
-    # Fresh transport data only. Never rank by historical HTTP request duration.
-    for record in list(data['nodes']):
-        check_record(record, count_failure=False)
-    prune_transport(data, events)
-    candidates = sorted((r for r in data['nodes'] if r['id'] != exclude
-                         and not r.get('transport_deferred') and r.get('reachability') == 'reachable'),
-                        key=lambda r: r.get('latency_ms') if r.get('latency_ms') is not None else float('inf'))
-    # ICMP can be filtered; unknown WireGuard endpoints are tried last, never
-    # pronounced dead from ping silence. TCP endpoints must complete a handshake.
-    candidates += [r for r in data['nodes'] if r['id'] != exclude and r['node']['protocol'] == 'wg'
-                   and not r.get('transport_deferred') and r.get('reachability') == 'unknown']
-    for record in candidates:
-        if activate(data, record, apply_pending=False):
-            if events is not None:
-                events.append({'kind': 'failover' if exclude else 'auto_connected', 'reason': reason,
-                               'previous': previous, 'current': name(record), 'failed': failed})
+    for index, record in enumerate(candidates):
+        # Save the cursor before a bounded connection attempt. A deferred attempt
+        # resumes here, without authenticating earlier candidates again.
+        data['next_id'] = record['id']
+        save(data)
+        if activate(data, record, apply_pending=manual and index == 0, events=events):
+            data['auto'] = True
+            for key in ('next_id', 'deferred_until', 'exhausted', 'direct_restored', 'direct_restore_pending'):
+                data.pop(key, None)
+            events.append({'kind': 'connected' if manual and not failed else 'failover' if previous else 'auto_connected',
+                           'reason': reason, 'previous': previous, 'current': name(record), 'failed': failed})
             return True
         if record.get('connection_deferred'):
-            if events is not None:
-                events.append({'kind': 'probe_deferred', 'reason': '本机频率限制或检测暂不可用；保留节点稍后重试'})
-            break
+            data['deferred_until'] = max(data.get('deferred_until', 0), time.time()+60)
+            events.append({'kind': 'probe_deferred', 'reason': '本机网络、检测额度或上游暂不可用；保留节点稍后重试'})
+            save(data)
+            return False
+        if record.get('pending_failed'):
+            data.pop('next_id', None)
+            events.append({'kind': 'connect_failed', 'reason': '待应用修改失败；原有节点配置和连接保留', 'current': previous})
+            return False
         failed.append(name(record))
-    if events is not None and failed:
-        events.append({'kind': 'connect_failed', 'reason': reason, 'previous': previous,
-                       'current': active_name(data), 'failed': failed})
-    print('当前候选未能连接；自动模式会在下一轮继续检测。', flush=True)
+        data['next_id'] = candidates[index+1]['id'] if index+1 < len(candidates) else None
+        save(data)
+    if not data['nodes']:
+        restore_direct(data, events)
     return False
 
 
 def stop_runtime():
-    subprocess.run(["bash", str(LIB / "runtime.sh"), "--stop-node"], check=True)
+    subprocess.run(["bash", str(LIB / "runtime.sh"), "--stop-node"], check=True, timeout=90)
 
 
 def remove_records(data, identities):
@@ -396,7 +394,7 @@ def remove_records(data, identities):
     if data.get("active_id") in identities:
         stop_runtime()
         data["active_id"] = None
-        CONFIG.unlink(missing_ok=True)
+        # Retain config so interrupted cleanup can identify owned routing rules.
     for record in [r for r in data["nodes"] if r["id"] in identities]:
         protocol = record["node"]["protocol"]
         path = PROFILES / f"{protocol}.json"
@@ -410,126 +408,125 @@ def remove_records(data, identities):
     return deleted
 
 
-def prune_transport(data, events):
-    # A healthy running connection has stronger evidence than a failed new TCP
-    # handshake. Its watchdog will confirm application-level failures separately.
-    doomed = {r['id'] for r in data['nodes'] if r.get('reachability') == 'unreachable'
-              and r['node']['protocol'] != 'wg' and r['id'] != data.get('active_id')}
-    if doomed:
-        deleted = remove_records(data, doomed)
-        events.append({'kind': 'deleted', 'reason': '服务器 TCP 握手失败，立即清除', 'deleted': deleted})
-        save(data)
-
-
 def scan(data, scheduled=False, choose_best=False, events=None):
+    """Legacy monitor commands never probe standby nodes."""
     events = [] if events is None else events
-    if choose_best:
-        subprocess.run(['bash', str(LIB/'runtime.sh'), '--start-node-monitor'], check=False)
-    records = list(data['nodes'])
     if scheduled:
-        now = time.time()
-        config = policy.settings()
-        if now-data.get('last_standby_check', 0) < config['standby_gap']:
-            return
-        due = [r for r in records if r['id'] != data.get('active_id')
-               and now-(r.get('latency_checked_at') or 0) >= config['standby_interval']]
-        records = sorted(due, key=lambda r: r.get('latency_checked_at') or 0)[:1]
-        if not records:
-            if data.get('pending_notifications'):
-                emit_events(data, [])
-            return
-        data['last_standby_check'] = int(now)
-    for record in records:
-        check_record(record)
-        save(data, publish=False)
-    prune_transport(data, events)
-    if choose_best:
-        connect_best(data, events=events, reason='按 TCPing/Ping 升序连接；失败立即清除并尝试下一节点')
+        if data.get('pending_notifications'):
+            emit_events(data, [])
+        return
+    if not choose_best:
+        watch(data, force=True)
+        return
+    subprocess.run(['bash', str(LIB/'runtime.sh'), '--start-node-monitor'], check=False, timeout=15)
+    data['auto'] = True
+    active = next((r for r in data['nodes'] if r['id'] == data.get('active_id')), None)
+    if active and running() and not data.get('next_id'):
+        print('已开启自动故障切换；继续保持当前连接。', flush=True)
+    else:
+        connect_next(data, events=events)
     events.extend(availability_events(data))
-    data['last_scan'] = int(time.time())
     save(data)
     emit_events(data, events)
 
 
-def manual_connect(data, identity, reason="用户手动连接指定节点"):
-    previous = active_name(data)
-    record = select(data, identity)
-    success = activate(data, record)
-    if success:
-        data["auto"] = True
-    events = [{"kind": "connected" if success else "connect_failed", "reason": reason,
-               "previous": previous, "current": active_name(data), "failed": [] if success else [name(record)]}]
+def start_notifications():
+    try:
+        if telegram_monitor.configured():
+            subprocess.run(['bash', str(LIB/'runtime.sh'), '--start-node-monitor'], check=False, timeout=15)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        print('Telegram 定时器暂未启动，节点连接继续。', flush=True)
+
+
+def manual_connect(data, identity, reason="用户手动连接指定节点；失败后按列表顺序尝试"):
+    selected = select(data, identity)
+    start_notifications()
+    was_auto = data.get('auto', False)
+    data['auto'] = True
+    events = []
+    success = connect_next(data, start_id=identity, events=events, reason=reason, manual=True)
+    if selected.get('pending_failed'):
+        data['auto'] = was_auto
     events.extend(availability_events(data))
     save(data)
     emit_events(data, events)
-    if not success and (not data.get("active_id") or not running()):
-        # No usable previous service to preserve: keep trying the inventory.
-        data["auto"] = True
-        save(data)
-        watch(data)
-        selected = next((r for r in data["nodes"] if r["id"] == data.get("active_id")), None)
-        return bool(selected and selected["status"] == "alive" and running())
     return success
 
 
-def watch(data):
-    """Reuse the active proxy; never authenticate all standby nodes."""
-    if not data.get('auto') or data.get('deferred_until', 0) > time.time():
+def watch(data, force=False):
+    """Only the selected connection is monitored; standby nodes remain idle."""
+    if data.get('direct_restore_pending'):
+        events = []
+        restore_direct(data, events)
+        emit_events(data, events)
+        return
+    if data.get('pending_notifications'):
+        emit_events(data, [])
+    if (not data.get('auto') and not force) or data.get('deferred_until', 0) > time.time():
+        return
+    if data.get('exhausted') and not data.get('auto'):
         return
     active = next((r for r in data['nodes'] if r['id'] == data.get('active_id')), None)
     service_up = running()
     if active and service_up:
-        if 0 <= time.time() - active.get('proxy_checked_at', 0) < policy.settings()['cache_ttl']:
+        if not force and not data.get('next_id') and 0 <= time.time()-active.get('proxy_checked_at', 0) < policy.settings()['active_interval']:
             return
         try:
             with policy.operation('current'):
                 try:
                     info = health(18081, attempts=1, timeout=12)
+                except policy.Deferred:
+                    raise
                 except RuntimeError:
                     log = subprocess.run(['journalctl','-u','sing-box','--since','-20 seconds','-n','100','--no-pager'],
                                          capture_output=True,text=True,timeout=5)
                     restriction = upstream_restriction(log.stdout)
                     if restriction:
                         raise restriction
+                    require_internet()
                     raise
         except policy.Deferred as exc:
-            if data.get('deferred_until', 0) < time.time():
-                data['deferred_until'] = exc.retry_at
-                emit_events(data, [{'kind': 'probe_deferred', 'reason': str(exc), 'current': name(active)}])
+            data['deferred_until'] = exc.retry_at
             save(data)
+            emit_events(data, [{'kind': 'probe_deferred', 'reason': str(exc), 'current': name(active)}])
             return
-        except (ValueError, OSError, RuntimeError, subprocess.SubprocessError):
-            # health() already tried the independent fallback URL. Confirmed
-            # HTTPS failure is removed now, without keeping failed-round counts.
-            pass
+        except (ValueError, OSError, subprocess.SubprocessError):
+            data['deferred_until'] = time.time()+180
+            save(data)
+            emit_events(data, [{'kind': 'probe_deferred', 'reason': '本机检测工具或配置异常，保留节点'}])
+            return
+        except RuntimeError:
+            pass  # Both proxy targets failed while direct HTTPS remained usable.
         else:
-            active.update(status='alive', watch_failures=0, proxy_checked_at=int(time.time()),
-                          http_latency_ms=info.get('latency_ms'))
+            active.update(status='alive', proxy_checked_at=int(time.time()), http_latency_ms=info.get('latency_ms'))
             active.pop('error', None)
             try:
                 policy.cache_put(active['fingerprint'], info, active=True)
             except (OSError, ValueError):
                 print('检测成功；本机缓存暂不可写，保留当前连接。', flush=True)
+            data['last_active_check'] = int(time.time())
             save(data)
-            if data.get('pending_notifications'):
-                emit_events(data, [])
+            if data.get('auto') and data.get('next_id'):
+                events = []
+                connect_next(data, events=events)
+                save(data)
+                emit_events(data, events)
             return
+    if not data.get('auto'):
+        print('当前连接检测失败；自动连接已关闭。', flush=True)
+        return
     events = []
     previous = name(active) if active else ''
-    confirmed = bool(active and service_up)
-    if confirmed:
+    start_id = data.get('next_id') or (active['id'] if active else None)
+    if active and service_up:
+        start_id = successor(data, active['id'])
+        data['next_id'] = start_id
         active['status'] = 'dead'
         deleted = remove_records(data, {active['id']})
-        events.append({'kind': 'deleted', 'reason': '当前代理两个 HTTPS 地址均连接失败，立即删除', 'deleted': deleted})
+        events.append({'kind': 'deleted', 'reason': '当前代理两个 HTTPS 地址均连接失败且本机直连正常，立即删除', 'deleted': deleted})
         save(data)
-    # A stopped local service alone does not prove that the node is invalid.
-    print('当前连接不可用，按 TCPing/Ping 延迟尝试；实际连接失败的候选立即删除。', flush=True)
-    connect_best(data, exclude=active['id'] if confirmed else None, events=events,
-                 reason='当前代理连接失败；按服务器延迟依次尝试')
-    if previous:
-        for event in events:
-            if event['kind'] in ('failover', 'auto_connected'):
-                event.update(kind='failover', previous=previous)
+    print('当前连接不可用，按列表顺序尝试下一个节点。', flush=True)
+    connect_next(data, start_id=start_id, events=events, previous=previous, reason='当前代理连接失败；按列表顺序进行故障切换')
     events.extend(availability_events(data))
     save(data)
     emit_events(data, events)
@@ -622,8 +619,7 @@ def commit_node(record, node):
     record["node"], record["fingerprint"] = node, fingerprint(node)
     for key in ("pending_node", "pending_fingerprint", "pending_error", "ip", "location_zh", "city", "region", "country", "org", "error"):
         record.pop(key, None)
-    record.update(status="unknown", failures=0, latency_ms=None, checked_at=None,
-                  latency_method=None, latency_checked_at=None, reachability="unknown", proxy_checked_at=0)
+    record.update(status="unknown", checked_at=None, proxy_checked_at=0)
     record["name"] = f"位置待查询-{LABELS[node['protocol']]}-{record['id'][:6]}"
 
 
@@ -705,6 +701,8 @@ def manual_stop(data):
         emit_events(data, [{"kind": "stop_failed", "reason": "主菜单关闭代理失败，请检查服务状态", "current": previous}])
         raise
     data["auto"], data["active_id"] = False, None
+    for key in ('next_id', 'deferred_until', 'exhausted', 'direct_restore_pending', 'direct_restored'):
+        data.pop(key, None)
     save(data)
     try:
         emit_events(data, [{"kind": "stopped", "reason": "主菜单手动关闭代理，自动连接已关闭", "previous": previous}])
@@ -781,10 +779,13 @@ def menu():
                 elif action == "8":
                     with locked():
                         fresh = load()
+                        next_id = successor(fresh, identity)
                         deleted = remove_records(fresh, {identity})
                         events = [{"kind": "deleted", "reason": "用户手动删除", "deleted": deleted}]
                         if fresh.get("auto") and not fresh.get("active_id"):
-                            scan(fresh, events=events)
+                            connect_next(fresh, start_id=next_id, events=events)
+                            save(fresh)
+                            emit_events(fresh, events)
                         else:
                             events.extend(availability_events(fresh))
                             save(fresh)
@@ -810,15 +811,15 @@ def menu():
                             save(fresh)
                         scan(fresh, choose_best=action == "5")
             elif action == "10":
-                current = policy.settings()['standby_interval']
-                raw = input(f"同一备用节点复测间隔（秒，至少60；当前{current}）：").strip() or str(current)
+                current = policy.settings()['active_interval']
+                raw = input(f"当前连接检测间隔（秒，至少60；当前{current}）：").strip() or str(current)
                 if not raw.isdecimal() or not 60 <= int(raw) <= 604800:
                     raise ValueError('请填写 60–604800 秒')
                 config = policy.settings()
-                config['standby_interval'] = int(raw)
+                config['active_interval'] = int(raw)
                 policy.atomic(policy.CONFIG, config)
                 policy.CONFIG.chmod(0o640)
-                print('已保存本机巡检间隔；每次轮询最多测一个备用节点。')
+                print('已保存当前节点检测间隔；备用节点不检测。')
             else:
                 print("请选择菜单中显示的功能编号")
         except (ValueError, OSError, RuntimeError, subprocess.SubprocessError) as exc:
