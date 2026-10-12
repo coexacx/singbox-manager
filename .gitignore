@@ -8,5 +8,6 @@ cesnode/
 telegram.json
 config.json
 node-store.json
+node-summary.json
 nodes.txt
 *.log

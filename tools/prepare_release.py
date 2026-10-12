@@ -47,7 +47,7 @@ def validate_sources():
     for path in (ROOT / "singbox-manager").rglob("*"):
         if path.is_symlink():
             raise ValueError(f"不打包符号链接：{path.relative_to(ROOT)}")
-        if path.name in {"node-store.json", "nodes.txt", "telegram.json", "config.json", "1.txt"} or "cesnode" in path.parts:
+        if path.name in {"node-store.json", "node-summary.json", "nodes.txt", "telegram.json", "config.json", "1.txt"} or "cesnode" in path.parts:
             raise ValueError(f"发布目录含运行资料或测试节点文件：{path.relative_to(ROOT)}")
 
 

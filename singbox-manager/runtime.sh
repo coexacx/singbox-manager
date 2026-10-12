@@ -14,7 +14,7 @@ error() { printf '错误：%s\n' "$*" >&2; }
 remove_file() { [[ ! -e $1 ]] || unlink -- "$1"; }
 require_install() {
   [[ -e $MARKER ]] || { error '请先选择 1 安装。'; return 1; }
-  [[ -f $LIB/API_VERSION && $(cat "$LIB/API_VERSION") == 3 ]] || { error '管理器需要更新，请先选择 1；现有节点资料会保留。'; return 1; }
+  [[ -f $LIB/API_VERSION && $(cat "$LIB/API_VERSION") == 4 ]] || { error '管理器需要更新，请先选择 1；现有节点资料会保留。'; return 1; }
 }
 locked_action() {
   ( flock -w 5 9 || { error '节点检测或切换正在进行，请稍后重试。'; return 1; }; "$@"; ) 9>/run/lock/singbox-manager.lock
@@ -145,6 +145,7 @@ start_telegram_monitor() {
     error 'Telegram 定时器启动失败；代理仍在运行。'
     return 0
   fi
+  [[ ${1:-} == defer ]] && return 0
   if ! systemctl start singbox-manager-telegram.service; then
     error 'Telegram 首条通知发送失败；代理仍在运行。请检查 Bot 配置和 journalctl 日志。'
   fi
@@ -223,12 +224,13 @@ enable_profile() {
   else
     say "已启用 $protocol（TUN $mode · 分流代理）；其他未命中规则的流量直连。"
   fi
-  start_telegram_monitor
+  start_telegram_monitor "${5:-}"
 }
 
 manual_enable() {
-  enable_profile "$@" || return 1
-  python3 "$LIB/node_manager.py" manual
+  enable_profile "$1" "$(current_tun_mode)" "$(current_traffic_mode)" "$PROFILES/$1.json" defer || return 1
+  python3 "$LIB/node_manager.py" manual || return 1
+  start_telegram_monitor
 }
 
 manual_disable() {
@@ -267,7 +269,9 @@ toggle_traffic_mode() {
 
 disable_proxy() {
   require_install || return 1
-  systemctl disable --now singbox-manager-telegram.timer 2>/dev/null || true
+  if [[ ${1:-} != keep-monitor ]]; then
+    systemctl disable --now singbox-manager-telegram.timer 2>/dev/null || true
+  fi
   systemctl disable --now sing-box.service
   if command -v resolvectl >/dev/null; then resolvectl flush-caches 2>/dev/null || true; fi
   remove_file "$STATE/active"
@@ -385,7 +389,7 @@ show_menu() {
   printf '%b  ── 诊断与退出 ──────────────────────────────%b\n' "$dim" "$reset"
   printf '   %b10%b  检测当前代理并获取出口 IP\n' "$accent" "$reset"
   printf '   %b11%b  开启 / 关闭 TUN（自动切换透明代理）\n' "$accent" "$reset"
-  printf '   %b12%b  配置 Telegram Bot 定时监测\n' "$accent" "$reset"
+  printf '   %b12%b  配置 Telegram 监测 / 节点事件通知\n' "$accent" "$reset"
   printf '   %b16%b  切换分流 / 全局模式\n' "$accent" "$reset"
   printf '   %b17%b  多节点管理 / 批量转换 / 自动连接\n' "$accent" "$reset"
   printf '   %b13%b  退出\n\n' "$accent" "$reset"
@@ -397,11 +401,15 @@ main() {
     [[ $EUID -eq 0 && $# -eq 2 ]] || return 1
     local protocol
     protocol=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["protocol"])' "$2")
-    enable_profile "$protocol" "$(current_tun_mode)" "$(current_traffic_mode)" "$2"
+    enable_profile "$protocol" "$(current_tun_mode)" "$(current_traffic_mode)" "$2" defer
     return $?
   elif [[ ${1:-} == --stop-node ]]; then
     [[ $EUID -eq 0 ]] || return 1
-    disable_proxy
+    disable_proxy keep-monitor
+    return $?
+  elif [[ ${1:-} == --start-node-monitor ]]; then
+    [[ $EUID -eq 0 ]] || return 1
+    start_telegram_monitor defer
     return $?
   fi
   check_host

@@ -4,6 +4,7 @@
 import argparse
 from contextlib import contextmanager
 import fcntl
+import grp
 import hashlib
 import json
 import os
@@ -16,6 +17,8 @@ from node_formats import normalize, parse_numbered
 from node_health import health, inspect
 from probe import probe
 from render import render
+from node_notifications import public_snapshot
+import telegram_monitor
 
 LIB = Path(__file__).resolve().parent
 PROFILES = Path("/etc/sing-box/manager")
@@ -27,12 +30,19 @@ CONFIG = Path("/etc/sing-box/config.json")
 LABELS = {"wg": "WireGuard", "https": "HTTPS", "shadowsocks": "Shadowsocks", "socks5": "SOCKS5"}
 
 
-def write_json(path, data):
+def write_json(path, data, shared=False):
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, name = tempfile.mkstemp(prefix=".nodes-", dir=path.parent)
     try:
         with os.fdopen(fd, "w") as stream:
             os.fchmod(stream.fileno(), 0o600)
+            if shared:
+                try:
+                    group = grp.getgrnam("sing-box").gr_gid
+                except KeyError:
+                    group = os.getgid()
+                os.fchown(stream.fileno(), os.getuid(), group)
+                os.fchmod(stream.fileno(), 0o640)
             json.dump(data, stream, ensure_ascii=False, indent=2)
             stream.write("\n")
             stream.flush()
@@ -51,8 +61,58 @@ def load():
     return data
 
 
-def save(data):
+def save(data, publish=True):
     write_json(DATABASE, data)
+    if publish:
+        write_json(PROFILES / "node-summary.json", public_snapshot(data), shared=True)
+
+
+def notification_ready():
+    try:
+        return telegram_monitor.configured() and subprocess.run(
+            ["systemctl", "is-enabled", "--quiet", "singbox-manager-telegram.timer"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+    except (OSError, ValueError):
+        return False
+
+
+def emit_events(data, events):
+    """Commit first; retry undelivered events on the next scan/operation."""
+    if not notification_ready():
+        return
+    pending = data.setdefault("pending_notifications", [])
+    pending.extend(dict(event, time=event.get("time", int(time.time()))) for event in events)
+    save(data)
+    if not pending:
+        return
+    try:
+        snapshot = public_snapshot(data)
+        snapshot["pending_count"] = 0  # These events are included in this message.
+        telegram_monitor.notify(snapshot=snapshot, events=pending)
+    except Exception as exc:
+        # Notifications must never roll back a successful connection. Keep only
+        # the exception type in logs; upstream errors might contain credentials.
+        print(f"Telegram 事件通知未送达（{type(exc).__name__}）；已保存，下次检测重试。", flush=True)
+        return
+    data["pending_notifications"] = []
+    save(data)
+
+
+def active_name(data):
+    return next((name(r) for r in data["nodes"] if r["id"] == data.get("active_id")), "")
+
+
+def availability_events(data):
+    previously = bool(data.get("availability_alert"))
+    unavailable = not any(r["status"] == "alive" for r in data["nodes"])
+    # Empty inventories only alert if automatic connection was requested or
+    # this is the continuation of an existing outage.
+    unavailable = unavailable and bool(data["nodes"] or data.get("auto") or previously)
+    data["availability_alert"] = unavailable
+    if unavailable != previously:
+        return [{"kind": "all_unavailable" if unavailable else "recovered",
+                 "reason": "本轮未找到可用节点" if unavailable else "本轮检测到可用节点"}]
+    return []
 
 
 @contextmanager
@@ -213,11 +273,13 @@ def activate(data, record):
     record["status"], record["failures"] = "alive", 0
     if (STATE / "exit_ip").exists():
         record["ip"] = (STATE / "exit_ip").read_text().strip()
-    save(data)
+    save(data, publish=False)
     return True
 
 
-def connect_best(data, exclude=None):
+def connect_best(data, exclude=None, events=None, reason="自动选择最低延迟可用节点"):
+    previous = active_name(data)
+    failed = []
     candidates = sorted((r for r in data["nodes"] if r["status"] == "alive" and r["id"] != exclude),
                         key=lambda r: r.get("latency_ms") if r.get("latency_ms") is not None else float("inf"))
     # If only the runtime process failed, retry the same reachable node after
@@ -225,7 +287,14 @@ def connect_best(data, exclude=None):
     candidates += [r for r in data["nodes"] if r["id"] == exclude and r["status"] == "alive"]
     for record in candidates:
         if activate(data, record):
+            if events is not None:
+                events.append({"kind": "failover" if exclude else "auto_connected", "reason": reason,
+                               "previous": previous, "current": name(record), "failed": failed})
             return True
+        failed.append(name(record))
+    if events is not None and failed:
+        events.append({"kind": "connect_failed", "reason": reason, "previous": previous,
+                       "current": active_name(data), "failed": failed})
     print("没有能够连接的存活节点；自动模式会在下一轮检测后重试。", flush=True)
     return False
 
@@ -235,6 +304,7 @@ def stop_runtime():
 
 
 def remove_records(data, identities):
+    deleted = [{"name": name(r), "failures": r.get("failures", 0)} for r in data["nodes"] if r["id"] in identities]
     if data.get("active_id") in identities:
         stop_runtime()
         data["active_id"] = None
@@ -249,13 +319,17 @@ def remove_records(data, identities):
             pass
         data["nodes"].remove(record)
         print(f"已删除节点：{name(record)}", flush=True)
+    return deleted
 
 
-def scan(data, scheduled=False, choose_best=False):
+def scan(data, scheduled=False, choose_best=False, events=None):
+    events = [] if events is None else events
+    if choose_best:
+        subprocess.run(["bash", str(LIB / "runtime.sh"), "--start-node-monitor"], check=False)
     for record in data["nodes"]:
         need_geo = not record.get("ip") or record.get("location_zh", "位置待查询") == "位置待查询"
         check_record(record, geography=need_geo, count_failure=scheduled)
-        save(data)
+        save(data, publish=False)
     active = next((r for r in data["nodes"] if r["id"] == data.get("active_id")), None)
     if data.get("auto"):
         broken = active is None or active["status"] != "alive" or not running()
@@ -266,13 +340,32 @@ def scan(data, scheduled=False, choose_best=False):
                 broken = True
         if choose_best or broken:
             # Exclude the failed active node even if its standalone probe works.
-            connect_best(data, exclude=active["id"] if broken and active else None)
+            reason = "用户开启自动连接，选择最低延迟节点" if choose_best else (
+                "当前节点检测失败" if active and active["status"] != "alive" else "当前代理未连接或运行检查失败")
+            connect_best(data, exclude=active["id"] if broken and active else None, events=events, reason=reason)
+    events.extend(availability_events(data))
     if scheduled:
         doomed = {r["id"] for r in data["nodes"] if r.get("failures", 0) >= data.get("delete_after", 3)}
         if doomed:
-            remove_records(data, doomed)
+            deleted = remove_records(data, doomed)
+            events.append({"kind": "deleted", "reason": f"达到连续 {data.get('delete_after', 3)} 轮失败的删除阈值", "deleted": deleted})
     data["last_scan"] = int(time.time())
     save(data)
+    emit_events(data, events)
+
+
+def manual_connect(data, identity):
+    previous = active_name(data)
+    record = select(data, identity)
+    success = activate(data, record)
+    if success:
+        data["auto"] = False
+    events = [{"kind": "connected" if success else "connect_failed", "reason": "用户手动连接指定节点",
+               "previous": previous, "current": active_name(data), "failed": [] if success else [name(record)]}]
+    events.extend(availability_events(data))
+    save(data)
+    emit_events(data, events)
+    return success
 
 
 def display(data):
@@ -344,16 +437,18 @@ def menu():
                 elif action == "4":
                     with locked():
                         fresh = load()
-                        if activate(fresh, select(fresh, identity)):
-                            fresh["auto"] = False
-                        save(fresh)
+                        manual_connect(fresh, identity)
                 elif action == "8":
                     with locked():
                         fresh = load()
-                        remove_records(fresh, {identity})
+                        deleted = remove_records(fresh, {identity})
+                        events = [{"kind": "deleted", "reason": "用户手动删除", "deleted": deleted}]
                         if fresh.get("auto") and not fresh.get("active_id"):
-                            scan(fresh)
-                        save(fresh)
+                            scan(fresh, events=events)
+                        else:
+                            events.extend(availability_events(fresh))
+                            save(fresh)
+                            emit_events(fresh, events)
                 else:
                     custom = input("新名称（回车恢复地理位置名称）：").strip()
                     if len(custom) > 80 or any(ord(c) < 32 for c in custom):
@@ -406,6 +501,7 @@ def main():
         data = load()
         if args.command == "init":
             migrate(data)
+            save(data)
         else:
             data["auto"] = False
             data["active_id"] = None

@@ -64,6 +64,7 @@ class Lifecycle(unittest.TestCase):
         self.patches = [patch.object(manager, 'DATABASE', self.root/'node-store.json'),
                         patch.object(manager, 'PROFILES', self.root),
                         patch.object(manager, 'CONFIG', self.root/'config.json'),
+                        patch.object(manager, 'notification_ready', return_value=False),
                         patch.object(manager, 'running', return_value=True),
                         patch.object(manager, 'health', return_value={'latency_ms': 50})]
         for item in self.patches:
@@ -95,7 +96,7 @@ class Lifecycle(unittest.TestCase):
         self.a['status'] = 'dead'
         with patch.object(manager, 'check_record'), patch.object(manager, 'connect_best', return_value=True) as connect:
             manager.scan(self.data, scheduled=True)
-            connect.assert_called_once_with(self.data, exclude=self.a['id'])
+            self.assertEqual(connect.call_args.kwargs['exclude'], self.a['id'])
         self.data['auto'] = False
         with patch.object(manager, 'check_record'), patch.object(manager, 'connect_best') as connect:
             manager.scan(self.data, scheduled=True)

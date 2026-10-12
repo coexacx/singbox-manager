@@ -21,6 +21,7 @@ SINGBOX_CONFIG = pathlib.Path("/etc/sing-box/config.json")
 TOKEN_RE = re.compile(r"^[0-9]{5,}:[A-Za-z0-9_-]{20,}$")
 USERNAME_RE = re.compile(r"^@[A-Za-z][A-Za-z0-9_]{4,31}$")
 from ip_lookup import lookup_proxy_ip
+from node_notifications import event_lines, summary_lines, split_message
 
 
 def command(*args):
@@ -228,27 +229,50 @@ def service_snapshot():
     return active, version, server_ip, protocol, tun, traffic
 
 
-def notify(event="periodic"):
+def load_summary():
+    try:
+        result = json.loads((CONFIG.parent / "node-summary.json").read_text())
+        return result if isinstance(result, dict) and result.get("version") == 1 else None
+    except (OSError, ValueError):
+        return None
+
+
+def notify(event="periodic", snapshot=None, events=None):
     data = load_config()
     if not configured():
         raise ValueError("尚未填写有效 Bot Token 与 chat_id")
     active, version, server_ip, protocol, tun, traffic = service_snapshot()
     status = "正常" if active == "active" else f"异常（{active or '未知'}）"
+    snapshot = snapshot if snapshot is not None else load_summary()
+    special = events is not None
+    selected = next((node for node in (snapshot or {}).get("nodes", [])
+                     if node.get("id") == (snapshot or {}).get("active_id")), None)
     try:
-        info = proxy_info() if active == "active" else None
+        if special:
+            # Fault alerts must not wait for an unresponsive proxy or IP provider.
+            info = {"ip": selected["ip"], "city": selected.get("location_zh")} if selected and selected.get("ip") else None
+        else:
+            info = proxy_info() if active == "active" else None
         problem = None
     except ValueError as exc:
         info = None
         problem = str(exc)
         status = "异常（代理出口检测失败）"
+    unavailable = bool((snapshot or {}).get("all_unavailable"))
+    if unavailable:
+        status = "异常（节点库无可用节点）"
+    elif special:
+        status = "事件通知；内核" + ("运行中" if active == "active" else "未运行")
+    warning = unavailable or active != "active" or (not special and not info) or any(
+        item.get("kind") == "connect_failed" for item in (events or []))
     lines = [
-        f"{'🟢' if info else '🔴'} sing-box 监测：{status}",
+        f"{'🔴' if warning else '🟢'} sing-box 监测：{status}",
         f"服务器：{socket.gethostname()}",
         f"本机 IP：{server_ip}",
         f"内核版本：{version}",
         f"代理协议：{protocol} ｜ TUN：{tun}",
         f"流量模式：{traffic}",
-        f"代理出口 IP：{info['ip'] if info else '不可用'}",
+        f"代理出口 IP{'（最近检测）' if special else ''}：{info['ip'] if info else '不可用'}",
     ]
     if info:
         place = " / ".join(str(info.get(key, "")).strip() for key in ("city", "region", "country") if info.get(key))
@@ -260,8 +284,18 @@ def notify(event="periodic"):
     lines.append(f"时间：{time.strftime('%Y-%m-%d %H:%M:%S %Z')}")
     if event == "started":
         lines.insert(1, "事件：代理已启用")
-    bot_api(data["token"], "sendMessage", {"chat_id": data["chat_id"], "text": "\n".join(lines)})
-    print(f"Telegram 通知已发送：{status}；出口 IP {info['ip'] if info else '不可用'}")
+    lines[1:1] = event_lines(events)
+    lines.extend(summary_lines(snapshot))
+    chunks = split_message("\n".join(lines))
+    message_ids = []
+    for index, chunk in enumerate(chunks, 1):
+        if index > 1:
+            time.sleep(1)
+        prefix = f"[{index}/{len(chunks)}] " if len(chunks) > 1 else ""
+        result = bot_api(data["token"], "sendMessage", {"chat_id": data["chat_id"], "text": prefix + chunk})
+        message_ids.append(result.get("message_id"))
+    print(f"Telegram 通知已发送：{status}；消息 ID {','.join(map(str, message_ids))}", flush=True)
+    return message_ids
 
 
 if __name__ == "__main__":
