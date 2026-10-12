@@ -155,6 +155,8 @@ def check_active(protocol):
 
 
 if __name__ == "__main__":
+    from utf8_runtime import ensure_utf8
+    ensure_utf8()
     try:
         if len(sys.argv) == 2:
             probe(sys.argv[1])

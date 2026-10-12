@@ -88,6 +88,8 @@ def sync():
 
 
 if __name__ == "__main__":
+    from utf8_runtime import ensure_utf8
+    ensure_utf8()
     try:
         if len(sys.argv) != 2 or sys.argv[1] not in ("sync", "stop"):
             raise ValueError("用法：transparent.py sync|stop")

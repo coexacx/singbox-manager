@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
-ASSET_URL=https://raw.githubusercontent.com/coexacx/singbox-manager/main/packages/singbox-assets-166c90b116f469af.tar.gz
-ASSET_SHA256=166c90b116f469afb340744d029455cf0fb6c9988db25acdb1124516ad3ac60e
+# Chinese menus, node names and child processes must share one encoding.
+export PYTHONUTF8=1 PYTHONIOENCODING=utf-8
+ASSET_URL=https://raw.githubusercontent.com/coexacx/singbox-manager/main/packages/singbox-assets-45afc4ec85eadd7f.tar.gz
+ASSET_SHA256=45afc4ec85eadd7fb028a6f458169e6dc3562c7651d6db2b01e52e81abdbe99e
 LIB=/usr/local/lib/singbox-manager
 STATE=/var/lib/singbox-manager
 CONFIG_DIR=/etc/sing-box

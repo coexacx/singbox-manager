@@ -12,6 +12,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/coexacx/singbox-manager/main
 
 首次运行选择 **1** 安装，然后填写节点并启用。更新时重新执行同一条命令，再选择 **1**；会保留现有节点资料和运行中的代理。
 
+管理器对自身 Python 进程统一使用 UTF-8，兼容 SSH 会话中的 `latin-1` / ASCII 编码环境；无需修改系统 locale。遇到旧版菜单 17 的 `UnicodeEncodeError` 时，按上述步骤更新即可。
+
 管理脚本与四种模板的资源包均从本 GitHub 仓库下载，资源包使用 SHA256 校验。系统基础依赖通过 Debian APT 安装，sing-box 内核沿用 SagerNet 官方 APT 源。
 
 菜单功能、节点字段和运行机制详见 [使用说明](singbox-manager/README.md)。仓库只包含空白节点模板；节点资料和 Telegram 配置保存在部署服务器的 `/etc/sing-box/manager/` 中。

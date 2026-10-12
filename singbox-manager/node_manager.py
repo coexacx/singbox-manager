@@ -522,6 +522,8 @@ def main():
 
 
 if __name__ == "__main__":
+    from utf8_runtime import ensure_utf8
+    ensure_utf8()
     try:
         main()
     except (ValueError, OSError, subprocess.SubprocessError) as exc:

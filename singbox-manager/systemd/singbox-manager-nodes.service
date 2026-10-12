@@ -6,6 +6,7 @@ ConditionPathExists=/var/lib/singbox-manager/installed
 
 [Service]
 Type=oneshot
+Environment=PYTHONUTF8=1 PYTHONIOENCODING=utf-8
 ExecStart=/usr/bin/python3 /usr/local/lib/singbox-manager/node_manager.py monitor
 UMask=0077
 TimeoutStartSec=infinity

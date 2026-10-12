@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+# Chinese menus, node names and child processes must share one encoding.
+export PYTHONUTF8=1 PYTHONIOENCODING=utf-8
 ASSET_URL=runtime_only
 ASSET_SHA256=runtime_only
 LIB=/usr/local/lib/singbox-manager
