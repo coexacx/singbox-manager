@@ -15,6 +15,7 @@ import sys
 import tempfile
 import time
 from urllib.parse import urlencode
+from deadline import deadline
 
 CONFIG = pathlib.Path("/etc/sing-box/manager/telegram.json")
 SINGBOX_CONFIG = pathlib.Path("/etc/sing-box/config.json")
@@ -25,7 +26,7 @@ from node_notifications import event_lines, summary_lines, split_message
 
 
 def command(*args):
-    return subprocess.run(args, capture_output=True, text=True, check=False)
+    return subprocess.run(args, capture_output=True, text=True, check=False, timeout=5)
 
 
 def physical_interface():
@@ -93,6 +94,11 @@ class DirectHTTPSConnection(http.client.HTTPSConnection):
 
 
 def bot_api(token, method, payload=None):
+    with deadline(20):
+        return _bot_api(token, method, payload)
+
+
+def _bot_api(token, method, payload=None):
     body = urlencode(payload or {}).encode()
     connection = DirectHTTPSConnection("api.telegram.org", timeout=18, context=ssl.create_default_context())
     try:
@@ -264,9 +270,12 @@ def notify(event="periodic", snapshot=None, events=None):
     elif special:
         status = "事件通知；内核" + ("运行中" if active == "active" else "未运行")
     warning = unavailable or active != "active" or (not special and not info) or any(
-        item.get("kind") == "connect_failed" for item in (events or []))
+        item.get("kind") in ("connect_failed", "stop_failed", "mode_failed") for item in (events or []))
+    stopped = bool(events and events[-1].get("kind") == "stopped" and active != "active")
+    if stopped:
+        status = "代理已手动关闭"
     lines = [
-        f"{'🔴' if warning else '🟢'} sing-box 监测：{status}",
+        f"{'⚪' if stopped else '🔴' if warning else '🟢'} sing-box 监测：{status}",
         f"服务器：{socket.gethostname()}",
         f"本机 IP：{server_ip}",
         f"内核版本：{version}",

@@ -17,12 +17,12 @@ CITIES = {"Tokyo": "东京", "Osaka": "大阪", "Singapore": "新加坡", "Hong 
           "Amsterdam": "阿姆斯特丹", "Paris": "巴黎", "Taipei": "台北", "Seoul": "首尔"}
 
 
-def request(port, url, max_time=10):
+def request(port, url, max_time=5):
     result = subprocess.run([
         "curl", "--silent", "--show-error", "--noproxy", "",
         "--proxy", f"socks5h://127.0.0.1:{port}", "--connect-timeout", "5",
         "--max-time", str(max_time), "--write-out", "\n%{http_code} %{time_total}", url,
-    ], capture_output=True, text=True, timeout=max_time + 3)
+    ], capture_output=True, text=True, timeout=max_time + 1)
     body, _, trailer = result.stdout.rpartition("\n")
     fields = trailer.split()
     if result.returncode or len(fields) != 2:
@@ -30,27 +30,37 @@ def request(port, url, max_time=10):
     return body, int(fields[0]), round(float(fields[1]) * 1000, 1)
 
 
-def health(port, attempts=3):
+def health(port, attempts=3, timeout=40, progress=None):
+    deadline = time.monotonic() + timeout
     for attempt in range(attempts):
         for url in HEALTH_URLS:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise RuntimeError("代理 HTTPS 连通性检测超时")
+            if progress:
+                progress(f"HTTPS 检测 {attempt + 1}/{attempts}：{url.split('/')[2]}")
             try:
-                _, status, latency = request(port, url)
+                _, status, latency = request(port, url, max_time=min(5, remaining))
                 if status == 204:
                     return {"latency_ms": latency, "latency_url": url}
             except (ValueError, OSError, RuntimeError, subprocess.TimeoutExpired):
                 pass
         if attempt + 1 < attempts:
-            time.sleep(1)
-    raise RuntimeError("连续三次 HTTP 检测失败（已使用两个独立检测站点）")
+            time.sleep(min(1, max(0, deadline - time.monotonic())))
+    raise RuntimeError(f"{attempts} 次 HTTP 检测均失败（已使用两个独立检测站点）")
 
 
-def chinese_location(port, info):
+def chinese_location(port, info, timeout=10):
     ip = str(ipaddress.ip_address(info["ip"]))
+    deadline = time.monotonic() + timeout
     # Look up the measured exit IP, not the server's direct IP. A 429 must not
     # turn a working node into a dead node.
     for url in (f"https://ipwho.is/{ip}?lang=zh-CN", f"http://ip-api.com/json/{ip}?lang=zh-CN"):
         try:
-            body, status, _ = request(port, url)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            body, status, _ = request(port, url, max_time=min(5, remaining))
             data = json.loads(body)
             if status != 200 or data.get("success") is False or data.get("status") == "fail":
                 continue

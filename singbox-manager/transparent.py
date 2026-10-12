@@ -16,7 +16,7 @@ MARK = "0x4001"
 
 
 def run(*args, input_text=None, check=True):
-    return subprocess.run(args, input=input_text, text=True, capture_output=True, check=check)
+    return subprocess.run(args, input=input_text, text=True, capture_output=True, check=check, timeout=5)
 
 
 def cleanup():
@@ -82,7 +82,7 @@ def sync():
             run("ip", "-6", "route", "replace", "local", "::/0", "dev", "lo", "table", ROUTE_TABLE)
             run("ip", "-6", "rule", "add", "pref", RULE_PRIORITY, "fwmark", f"{MARK}/{MARK}", "lookup", ROUTE_TABLE)
         run("nft", "-f", "-", input_text=rules)
-    except (OSError, subprocess.CalledProcessError):
+    except (OSError, subprocess.SubprocessError):
         cleanup()
         raise
 
@@ -97,7 +97,7 @@ if __name__ == "__main__":
             sync()
         else:
             cleanup()
-    except (ValueError, OSError, subprocess.CalledProcessError) as exc:
+    except (ValueError, OSError, subprocess.SubprocessError) as exc:
         if isinstance(exc, subprocess.CalledProcessError):
             print(f"透明代理规则错误：{exc.stderr.strip()[:500]}", file=sys.stderr)
         else:

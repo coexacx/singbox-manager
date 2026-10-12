@@ -24,6 +24,7 @@ def public_snapshot(data):
             "ip": clean(record.get("ip")),
             "location_zh": clean(record.get("location_zh")),
             "checked_at": record.get("checked_at"),
+            "pending_changes": bool(record.get("pending_node")),
         })
     return {
         "version": 1, "nodes": nodes, "active_id": data.get("active_id"),
@@ -60,6 +61,8 @@ def summary_lines(snapshot):
         current = " [当前]" if node.get("id") == snapshot.get("active_id") else ""
         delay = f"{node['latency_ms']} ms" if node.get("latency_ms") is not None else "—"
         lines.append(f"{index}. {clean(node.get('name'))}{current}")
+        if node.get("pending_changes"):
+            lines.append("   存在待应用修改；自动巡检使用原配置")
         lines.append(f"   {PROTOCOLS.get(node.get('protocol'), '未知')} | {STATUSES.get(node.get('status'), '未知')} | {delay} | 连续失败 {node.get('failures', 0)} 轮 | IP {clean(node.get('ip')) or '待查询'}")
     return lines
 
@@ -67,7 +70,8 @@ def summary_lines(snapshot):
 def event_lines(events):
     titles = {"connected": "节点连接成功", "auto_connected": "自动连接成功", "failover": "自动故障切换成功",
               "connect_failed": "节点连接失败", "deleted": "节点已删除", "all_unavailable": "全部节点不可用",
-              "recovered": "节点可用性恢复"}
+              "recovered": "节点可用性恢复", "stopped": "代理已手动关闭", "stop_failed": "关闭代理失败",
+              "mode_changed": "运行模式切换成功", "mode_failed": "运行模式切换失败", "edited": "节点配置已保存"}
     lines = []
     for event in events or []:
         kind = event.get("kind")
@@ -79,7 +83,10 @@ def event_lines(events):
         if event.get("reason"):
             lines.append("原因：" + clean(event["reason"], 240))
         if event.get("previous") or event.get("current"):
-            lines.append(f"节点：{clean(event.get('previous')) or '未连接'} → {clean(event.get('current')) or '未连接'}")
+            if event.get("previous") == event.get("current"):
+                lines.append("节点：" + clean(event.get("current")))
+            else:
+                lines.append(f"节点：{clean(event.get('previous')) or '未连接'} → {clean(event.get('current')) or '未连接'}")
         if event.get("failed"):
             lines.append("连接失败的候选：" + "、".join(clean(item) for item in event["failed"]))
         for item in event.get("deleted", []):

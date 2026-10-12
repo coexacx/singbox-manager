@@ -9,14 +9,29 @@ import sys
 import tempfile
 import time
 import copy
+import os
 
 from ip_lookup import lookup_proxy_ip
 
 EXIT_IP_FILE = pathlib.Path("/var/lib/singbox-manager/exit_ip")
+RESULT_FILE = EXIT_IP_FILE.with_name("probe-result.json")
+
+
+def say(message):
+    print(message, flush=True)
 
 
 def test_exit_ip(port, protocol):
-    return lookup_proxy_ip(port, rounds=3 if protocol == "wg" else 2)
+    from node_health import health
+    say("  [连通性] 验证代理 HTTPS 请求，最多 20 秒…")
+    info = health(port, attempts=2, timeout=20, progress=lambda text: say("    " + text))
+    say("  [出口信息] 查询代理 IP，最多 15 秒…")
+    try:
+        info.update(lookup_proxy_ip(port, rounds=1, timeout=15, progress=lambda text: say("    " + text)))
+    except (RuntimeError, OSError):
+        say("  代理 HTTPS 连通正常；IP 查询暂不可用，稍后监测会重试。")
+    info["checked_at"] = int(time.time())
+    return info
 
 
 def available_port():
@@ -27,7 +42,7 @@ def available_port():
 
 def physical_interface():
     for family in ("-4", "-6"):
-        result = subprocess.run(["ip", family, "route", "show", "default", "table", "main"], capture_output=True, text=True)
+        result = subprocess.run(["ip", family, "route", "show", "default", "table", "main"], capture_output=True, text=True, timeout=5)
         if result.returncode == 0:
             words = result.stdout.split()
             if "dev" in words:
@@ -78,7 +93,7 @@ def probe(config_path, inspector=None, quiet=False):
     with tempfile.TemporaryDirectory(prefix="singbox-probe-") as directory:
         candidate = pathlib.Path(directory) / "config.json"
         candidate.write_text(json.dumps(config))
-        checked = subprocess.run(["sing-box", "check", "-c", str(candidate)], capture_output=True, text=True)
+        checked = subprocess.run(["sing-box", "check", "-c", str(candidate)], capture_output=True, text=True, timeout=10)
         if checked.returncode:
             raise RuntimeError("节点测试配置无效：" + checked.stderr.strip()[:500])
         with open(pathlib.Path(directory) / "sing-box.log", "w+") as log:
@@ -99,15 +114,15 @@ def probe(config_path, inspector=None, quiet=False):
                     time.sleep(3)
                 info = inspector(port) if inspector else test_exit_ip(port, protocol)
                 if not quiet:
-                    print(f"节点测试通过：经 {protocol} 节点访问 {info.get('source', 'HTTP 检测')}，出口 IP：{info.get('ip', '未查询')}")
-                return info if inspector else info["ip"]
+                    say(f"节点测试通过：{protocol} HTTPS 连通，出口 IP：{info.get('ip', '暂未查询到')}")
+                return info if inspector else info.get("ip")
             finally:
                 process.terminate()
                 try:
                     process.wait(timeout=3)
                 except subprocess.TimeoutExpired:
                     process.kill()
-                    process.wait()
+                    process.wait(timeout=3)
 
 
 def check_active(protocol):
@@ -121,7 +136,13 @@ def check_active(protocol):
     tun_name = next((item.get("interface_name") or "sb-split0" for item in active["inbounds"]
                      if item.get("type") == "tun"), "sb-split0")
     ready = False
-    for _ in range(120):
+    say("  [入口就绪] 等待 TUN/透明代理及本地检测端口，最多 30 秒…")
+    deadline = time.monotonic() + 30
+    next_notice = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        if time.monotonic() >= next_notice:
+            say(f"    入口仍在启动，剩余 {max(0, int(deadline-time.monotonic()))} 秒…")
+            next_notice = time.monotonic() + 5
         try:
             with socket.create_connection(("127.0.0.1", 18081), timeout=0.2):
                 pass
@@ -129,11 +150,11 @@ def check_active(protocol):
             time.sleep(0.5)
             continue
         if "tun" in inbound_types:
-            link = subprocess.run(["ip", "link", "show", tun_name], capture_output=True)
+            link = subprocess.run(["ip", "link", "show", tun_name], capture_output=True, timeout=3)
             ready = link.returncode == 0
         else:
-            table = subprocess.run(["nft", "list", "table", "inet", "singbox_manager"], capture_output=True)
-            rules = subprocess.run(["ip", "-4", "rule", "show"], capture_output=True, text=True)
+            table = subprocess.run(["nft", "list", "table", "inet", "singbox_manager"], capture_output=True, timeout=3)
+            rules = subprocess.run(["ip", "-4", "rule", "show"], capture_output=True, text=True, timeout=3)
             ready = (table.returncode == 0 and rules.returncode == 0
                      and "fwmark 0x4001/0x4001 lookup 18082" in rules.stdout)
         if ready:
@@ -143,14 +164,25 @@ def check_active(protocol):
         if "tun" in inbound_types:
             if not pathlib.Path("/dev/net/tun").exists():
                 raise RuntimeError("TUN 设备 /dev/net/tun 不存在；请在服务器宿主机开放 TUN")
-            raise RuntimeError(f"TUN 接口 {tun_name} 或服务检测入口在 60 秒内未就绪；请检查 sing-box 服务日志和 TUN 权限")
-        raise RuntimeError("透明代理规则或服务检测入口在 60 秒内未就绪；请检查 sing-box 服务日志")
+            raise RuntimeError(f"TUN 接口 {tun_name} 或服务检测入口在 30 秒内未就绪；请检查 sing-box 服务日志和 TUN 权限")
+        raise RuntimeError("透明代理规则或服务检测入口在 30 秒内未就绪；请检查 sing-box 服务日志")
     info = test_exit_ip(18081, protocol)
-    ip = info["ip"]
+    ip = info.get("ip")
     EXIT_IP_FILE.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    EXIT_IP_FILE.write_text(ip + "\n")
-    EXIT_IP_FILE.chmod(0o600)
-    print(f"服务节点检测通过：经 {protocol} 节点访问 {info['source']}，出口 IP：{ip}")
+    if ip:
+        EXIT_IP_FILE.write_text(ip + "\n")
+        EXIT_IP_FILE.chmod(0o600)
+    else:
+        EXIT_IP_FILE.unlink(missing_ok=True)
+    fd, temporary = tempfile.mkstemp(dir=RESULT_FILE.parent, prefix=".probe-")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            os.fchmod(stream.fileno(), 0o600)
+            json.dump(dict(info, protocol=protocol), stream)
+        os.replace(temporary, RESULT_FILE)
+    finally:
+        pathlib.Path(temporary).unlink(missing_ok=True)
+    say(f"服务节点检测通过：{protocol} HTTPS 连通，出口 IP：{ip or '暂未查询到'}")
     return ip
 
 
@@ -164,6 +196,6 @@ if __name__ == "__main__":
             check_active(sys.argv[2])
         else:
             raise ValueError("用法：probe.py CONFIG.json 或 probe.py --active PROTOCOL")
-    except (ValueError, OSError, RuntimeError, json.JSONDecodeError) as exc:
+    except (ValueError, OSError, RuntimeError, subprocess.SubprocessError, json.JSONDecodeError) as exc:
         print(f"节点测试失败：{exc}", file=sys.stderr)
         sys.exit(1)

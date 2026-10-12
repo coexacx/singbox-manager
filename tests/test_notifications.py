@@ -37,7 +37,7 @@ class Notifications(unittest.TestCase):
             item.stop()
         self.tmp.cleanup()
 
-    def activate(self, data, record):
+    def activate(self, data, record, **kwargs):
         data['active_id'] = record['id']
         record.update(status='alive',failures=0)
         return True
@@ -51,11 +51,11 @@ class Notifications(unittest.TestCase):
         self.assertEqual((self.root/'node-summary.json').stat().st_mode & 0o777,0o640)
         self.assertIn('日本-东京', '\n'.join(summary_lines(json.loads(raw))))
 
-    def test_manual_notification_uses_committed_node_and_manual_mode(self):
+    def test_selected_node_notification_uses_committed_node_and_failover_mode(self):
         with patch.object(manager,'activate',side_effect=self.activate):
             self.assertTrue(manager.manual_connect(self.data,self.b['id']))
         kw = self.sender.call_args.kwargs
-        self.assertFalse(kw['snapshot']['auto'])
+        self.assertTrue(kw['snapshot']['auto'])
         self.assertEqual(kw['snapshot']['active_id'],self.b['id'])
         self.assertEqual(kw['events'][0]['previous'],'日本-东京')
         self.assertEqual(kw['events'][0]['current'],'新加坡')

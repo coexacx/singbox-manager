@@ -44,10 +44,10 @@ def has_ipv6_default():
             ["ip", "-6", "route", "show", "default"],
             capture_output=True,
             text=True,
-            check=True,
+            check=True, timeout=5,
         )
         return bool(result.stdout.strip())
-    except (OSError, subprocess.CalledProcessError):
+    except (OSError, subprocess.SubprocessError):
         return False
 
 
@@ -63,7 +63,7 @@ def ssh_peer_routes():
     try:
         result = subprocess.run(
             ["ss", "-Htnp", "state", "established"],
-            capture_output=True, text=True, check=True,
+            capture_output=True, text=True, check=True, timeout=5,
         )
         for line in result.stdout.splitlines():
             if '"sshd' not in line and '"dropbear"' not in line:
@@ -72,7 +72,7 @@ def ssh_peer_routes():
             if len(columns) >= 4:
                 host = columns[3].rsplit(":", 1)[0].strip("[]")
                 peers.add(host)
-    except (OSError, subprocess.CalledProcessError):
+    except (OSError, subprocess.SubprocessError):
         pass
     routes = []
     for peer in sorted(peers):
@@ -92,7 +92,7 @@ def ssh_server_ports():
         ports.add(int(connection[3]))
     try:
         result = subprocess.run(
-            ["ss", "-Hltnp"], capture_output=True, text=True, check=True,
+            ["ss", "-Hltnp"], capture_output=True, text=True, check=True, timeout=5,
         )
         for line in result.stdout.splitlines():
             if '"sshd"' not in line and '"dropbear"' not in line:
@@ -102,7 +102,7 @@ def ssh_server_ports():
                 raw = columns[3].rsplit(":", 1)[-1]
                 if raw.isdigit():
                     ports.add(int(raw))
-    except (OSError, subprocess.CalledProcessError):
+    except (OSError, subprocess.SubprocessError):
         pass
     return sorted(port for port in ports if 1 <= port <= 65535)
 

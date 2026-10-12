@@ -2,8 +2,8 @@
 set -Eeuo pipefail
 # Chinese menus, node names and child processes must share one encoding.
 export PYTHONUTF8=1 PYTHONIOENCODING=utf-8
-ASSET_URL=https://raw.githubusercontent.com/coexacx/singbox-manager/main/packages/singbox-assets-45afc4ec85eadd7f.tar.gz
-ASSET_SHA256=45afc4ec85eadd7fb028a6f458169e6dc3562c7651d6db2b01e52e81abdbe99e
+ASSET_URL=https://raw.githubusercontent.com/coexacx/singbox-manager/main/packages/singbox-assets-3573610bfa366578.tar.gz
+ASSET_SHA256=3573610bfa36657806c730e9b48b6542f02f18c70026a9065742f1a8f4b0d50e
 LIB=/usr/local/lib/singbox-manager
 STATE=/var/lib/singbox-manager
 CONFIG_DIR=/etc/sing-box
@@ -16,7 +16,7 @@ error() { printf '错误：%s\n' "$*" >&2; }
 remove_file() { [[ ! -e $1 ]] || unlink -- "$1"; }
 require_install() {
   [[ -e $MARKER ]] || { error '请先选择 1 安装。'; return 1; }
-  [[ -f $LIB/API_VERSION && $(cat "$LIB/API_VERSION") == 4 ]] || { error '管理器需要更新，请先选择 1；现有节点资料会保留。'; return 1; }
+  [[ -f $LIB/API_VERSION && $(cat "$LIB/API_VERSION") == 5 ]] || { error '管理器需要更新，请先选择 1；现有节点资料会保留。'; return 1; }
 }
 locked_action() {
   ( flock -w 5 9 || { error '节点检测或切换正在进行，请稍后重试。'; return 1; }; "$@"; ) 9>/run/lock/singbox-manager.lock
@@ -45,7 +45,6 @@ install_manager() {
     repo_created=0; [[ ! -e /etc/apt/sources.list.d/sagernet.sources ]] && repo_created=1
     key_created=0; [[ ! -e /etc/apt/keyrings/sagernet.asc ]] && key_created=1
   fi
-  apt-get update
   install -d -m 0700 "$STATE"
   if [[ ! -f $STATE/nft_was_installed ]]; then
     if dpkg-query -s nftables 2>/dev/null | grep -q '^Status: install ok installed$'; then
@@ -55,8 +54,14 @@ install_manager() {
     fi
     chmod 0600 "$STATE/nft_was_installed"
   fi
-  apt-get install -y ca-certificates curl python3 iproute2 nftables
-  if ! command -v sing-box >/dev/null || ! dpkg --compare-versions "$(sing-box version | awk 'NR==1 {print $3}')" ge 1.14.0; then
+  local dependencies=() package
+  for package in ca-certificates curl python3 iproute2 nftables; do
+    if ! dpkg-query -s "$package" 2>/dev/null | grep -q '^Status: install ok installed$'; then dependencies+=("$package"); fi
+  done
+  if [[ ${#dependencies[@]} -gt 0 ]]; then
+    apt-get update && apt-get install -y --no-upgrade "${dependencies[@]}" || { error '依赖安装失败，请检查 APT 源后重试。'; return 1; }
+  fi
+  if [[ ! -x /usr/bin/sing-box ]] || ! dpkg --compare-versions "$(/usr/bin/sing-box version | awk 'NR==1 {print $3}')" ge 1.14.0; then
     install -d -m 0755 /etc/apt/keyrings
     curl -fsSL https://sing-box.app/gpg.key -o /etc/apt/keyrings/sagernet.asc
     chmod 0644 /etc/apt/keyrings/sagernet.asc
@@ -68,8 +73,7 @@ Components: *
 Enabled: yes
 Signed-By: /etc/apt/keyrings/sagernet.asc
 EOF
-    apt-get update
-    apt-get install -y sing-box
+    apt-get update && apt-get install -y sing-box || { error 'sing-box 安装失败，请检查 APT 源。'; return 1; }
   fi
   command -v sing-box >/dev/null || { error 'sing-box 安装失败。'; return 1; }
   dpkg --compare-versions "$(sing-box version | awk 'NR==1 {print $3}')" ge 1.14.0 || { error 'sing-box 版本低于 1.14。'; return 1; }
@@ -93,6 +97,8 @@ EOF
   install -m 0644 "$LIB/systemd/singbox-manager-telegram.timer" /etc/systemd/system/singbox-manager-telegram.timer
   install -m 0644 "$LIB/systemd/singbox-manager-nodes.service" /etc/systemd/system/singbox-manager-nodes.service
   install -m 0644 "$LIB/systemd/singbox-manager-nodes.timer" /etc/systemd/system/singbox-manager-nodes.timer
+  install -m 0644 "$LIB/systemd/singbox-manager-watch.service" /etc/systemd/system/singbox-manager-watch.service
+  install -m 0644 "$LIB/systemd/singbox-manager-watch.timer" /etc/systemd/system/singbox-manager-watch.timer
   install -d -m 0755 /etc/systemd/system/sing-box.service.d
   if [[ ! -f $STATE/dropin_recorded ]]; then
     if [[ -e /etc/systemd/system/sing-box.service.d/99-split-manager.conf ]]; then
@@ -100,11 +106,8 @@ EOF
     fi
     touch "$STATE/dropin_recorded"
   fi
-  cat >/etc/systemd/system/sing-box.service.d/99-split-manager.conf <<'EOF'
-[Service]
-ExecStartPost=+/usr/bin/python3 /usr/local/lib/singbox-manager/transparent.py sync
-ExecStopPost=+/usr/bin/python3 /usr/local/lib/singbox-manager/transparent.py stop
-EOF
+  install -d -o sing-box -g sing-box -m 0750 /var/lib/sing-box
+  install -m 0644 "$LIB/systemd/99-split-manager.conf" /etc/systemd/system/sing-box.service.d/99-split-manager.conf
   systemctl daemon-reload
   if [[ ! -e $MARKER ]]; then
     if [[ $had_config -eq 1 ]]; then cp -p -- "$CONFIG" "$STATE/original.config"; fi
@@ -121,6 +124,7 @@ EOF
   fi
   python3 "$LIB/node_manager.py" init
   systemctl enable --now singbox-manager-nodes.timer >/dev/null
+  systemctl enable --now singbox-manager-watch.timer >/dev/null
   if [[ $(sed -n 's/^old_installed=//p' "$STATE/original.state") == 0 && ! -e $STATE/active ]]; then
     systemctl disable --now sing-box.service 2>/dev/null || true
   fi
@@ -133,8 +137,7 @@ EOF
 
 edit_profile() {
   require_install || return 1
-  [[ -f $PROFILES/$1.json && -f $LIB/templates/$1.json ]] || { error '此协议模板尚未安装，请先选择 1 更新管理器。'; return 1; }
-  python3 "$LIB/edit_node.py" "$1" "$PROFILES/$1.json"
+  python3 "$LIB/node_manager.py" edit-protocol "$1"
 }
 
 telegram_ready() {
@@ -143,12 +146,12 @@ telegram_ready() {
 
 start_telegram_monitor() {
   telegram_ready || return 0
-  if ! systemctl enable --now singbox-manager-telegram.timer >/dev/null; then
+  if ! timeout 10s systemctl enable --now singbox-manager-telegram.timer >/dev/null; then
     error 'Telegram 定时器启动失败；代理仍在运行。'
     return 0
   fi
   [[ ${1:-} == defer ]] && return 0
-  if ! systemctl start singbox-manager-telegram.service; then
+  if ! timeout -k 3s 45s systemctl start singbox-manager-telegram.service; then
     error 'Telegram 首条通知发送失败；代理仍在运行。请检查 Bot 配置和 journalctl 日志。'
   fi
 }
@@ -169,75 +172,100 @@ configure_telegram() {
 }
 
 restore_previous() {
-  local previous=$1 was_active=$2 was_enabled=$3
-  if [[ -s $previous ]]; then cp -p -- "$previous" "$CONFIG"; else remove_file "$CONFIG"; fi
-  if [[ $was_active == 1 ]]; then systemctl restart sing-box.service || true
-  else systemctl stop sing-box.service || true; fi
-  if [[ $was_enabled == 0 ]]; then systemctl disable sing-box.service 2>/dev/null || true; fi
+  local backup=$1 was_active=$2 was_enabled=$3 item failed=0
+  say '正在恢复切换前的配置与服务状态…'
+  timeout -k 3s 25s systemctl stop sing-box.service || failed=1
+  if [[ -f $backup/config ]]; then cp -p -- "$backup/config" "$CONFIG" || failed=1
+  else remove_file "$CONFIG" || failed=1; fi
+  for item in active tun_mode traffic_mode exit_ip probe-result.json; do
+    if [[ -f $backup/$item ]]; then cp -p -- "$backup/$item" "$STATE/$item" || failed=1
+    else remove_file "$STATE/$item" || failed=1; fi
+  done
+  if [[ $was_enabled == 1 ]]; then timeout 10s systemctl enable sing-box.service >/dev/null || failed=1
+  else timeout 10s systemctl disable sing-box.service 2>/dev/null || failed=1; fi
+  if [[ $was_active == 1 ]]; then
+    timeout -k 3s 60s systemctl start sing-box.service || failed=1
+    systemctl is-active --quiet sing-box.service || failed=1
+  fi
+  [[ $failed == 0 ]]
 }
 
-enable_profile() {
-  local protocol=$1 mode=${2:-$(current_tun_mode)} traffic=${3:-$(current_traffic_mode)} old_mode old_traffic candidate previous was_active was_enabled
-  local node_file=${4:-$PROFILES/$protocol.json}
+enable_profile() (
+  local protocol=$1 mode=${2:-$(current_tun_mode)} traffic=${3:-$(current_traffic_mode)} candidate backup item
+  local node_file=${4:-$PROFILES/$protocol.json} armed=0 was_active=0 was_enabled=0
   require_install || return 1
   [[ -f $PROFILES/$protocol.json && -f $LIB/templates/$protocol.json ]] || { error '此协议模板尚未安装，请先选择 1 更新管理器。'; return 1; }
-  old_mode=$(current_tun_mode)
-  old_traffic=$(current_traffic_mode)
-  candidate=$(mktemp "$CONFIG_DIR/.candidate.XXXXXXXX")
-  previous=$(mktemp "$CONFIG_DIR/.previous.XXXXXXXX")
+  backup=$(mktemp -d "$STATE/.switch.XXXXXXXX") || return 1
+  candidate=$backup/candidate
+  activation_cleanup() {
+    local result=$?
+    trap - EXIT INT TERM
+    if [[ $armed == 1 ]]; then
+      if restore_previous "$backup" "$was_active" "$was_enabled"; then
+        error '切换未完成，已恢复先前配置与服务状态。'
+      else
+        error '切换失败，恢复服务也未完成；请检查 systemctl status sing-box 与服务日志。'
+      fi
+      result=1
+    fi
+    python3 -c 'import shutil,sys; shutil.rmtree(sys.argv[1])' "$backup"
+    exit "$result"
+  }
+  trap activation_cleanup EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
   if ! python3 "$LIB/render.py" "$node_file" "$LIB/templates" "$candidate" "$mode" "$traffic"; then
-    error '节点信息不完整或格式错误。WireGuard 默认 MTU 为 1280。'
-    remove_file "$candidate"; remove_file "$previous"; return 1
+    error '节点信息不完整或格式错误。WireGuard 默认 MTU 为 1280。'; return 1
   fi
-  if ! sing-box check -c "$candidate"; then
-    error 'sing-box 配置校验失败。'
-    remove_file "$candidate"; remove_file "$previous"; return 1
+  if ! timeout -k 3s 12s sing-box check -c "$candidate"; then
+    error 'sing-box 配置校验失败或超时。'; return 1
   fi
-  say '切换前检测节点连通性…'
-  if ! python3 "$LIB/probe.py" "$candidate"; then
-    error '节点不可用，保持现有配置。'
-    remove_file "$candidate"; remove_file "$previous"; return 1
+  say '[1/3] 切换前检测节点连通性（最多 60 秒）…'
+  if ! timeout -k 3s 60s python3 "$LIB/probe.py" "$candidate"; then
+    error '节点不可用或检测超时，保持现有配置。'; return 1
   fi
-  was_active=0; systemctl is-active --quiet sing-box.service && was_active=1
-  was_enabled=0; systemctl is-enabled --quiet sing-box.service && was_enabled=1
-  if [[ -f $CONFIG ]]; then cp -p -- "$CONFIG" "$previous"; fi
-  printf '%s\n' "$mode" >"$STATE/tun_mode"; chmod 0600 "$STATE/tun_mode"
-  printf '%s\n' "$traffic" >"$STATE/traffic_mode"; chmod 0600 "$STATE/traffic_mode"
-  chown root:sing-box "$candidate"; chmod 0640 "$candidate"
-  mv -f -- "$candidate" "$CONFIG"
-  systemctl enable sing-box.service >/dev/null
-  if [[ $was_active == 1 ]]; then systemctl restart sing-box.service || true
-  else systemctl start sing-box.service || true; fi
-  if command -v resolvectl >/dev/null; then resolvectl flush-caches 2>/dev/null || true; fi
-  if command -v nscd >/dev/null; then nscd -i hosts 2>/dev/null || true; fi
-  say '启用后复检服务和节点…'
-  if ! systemctl is-active --quiet sing-box.service || ! python3 "$LIB/probe.py" --active "$protocol"; then
-    printf '%s\n' "$old_mode" >"$STATE/tun_mode"
-    printf '%s\n' "$old_traffic" >"$STATE/traffic_mode"
-    restore_previous "$previous" "$was_active" "$was_enabled"
-    remove_file "$previous"
-    error '启用后检测失败，已恢复先前状态。'
-    return 1
+  systemctl is-active --quiet sing-box.service && was_active=1
+  systemctl is-enabled --quiet sing-box.service && was_enabled=1
+  if [[ -f $CONFIG ]]; then cp -p -- "$CONFIG" "$backup/config" || return 1; fi
+  for item in active tun_mode traffic_mode exit_ip probe-result.json; do
+    if [[ -f $STATE/$item ]]; then cp -p -- "$STATE/$item" "$backup/$item" || return 1; fi
+  done
+  armed=1
+  printf '%s\n' "$mode" >"$STATE/tun_mode" || return 1
+  printf '%s\n' "$traffic" >"$STATE/traffic_mode" || return 1
+  chmod 0600 "$STATE/tun_mode" "$STATE/traffic_mode" || return 1
+  chown root:sing-box "$candidate" && chmod 0640 "$candidate" && mv -f -- "$candidate" "$CONFIG" || return 1
+  say '[2/3] 启动代理服务（最多 60 秒）…'
+  timeout 10s systemctl enable sing-box.service >/dev/null || return 1
+  if [[ $was_active == 1 ]]; then
+    timeout -k 3s 60s systemctl restart sing-box.service || return 1
+  else
+    timeout -k 3s 60s systemctl start sing-box.service || return 1
   fi
-  printf '%s\n' "$protocol" >"$STATE/active"; chmod 0600 "$STATE/active"
-  remove_file "$previous"
+  if command -v resolvectl >/dev/null; then timeout 3s resolvectl flush-caches 2>/dev/null || true; fi
+  if command -v nscd >/dev/null; then timeout 3s nscd -i hosts 2>/dev/null || true; fi
+  say '[3/3] 启用后复检服务和节点（最多 75 秒）…'
+  if ! systemctl is-active --quiet sing-box.service || ! timeout -k 3s 75s python3 "$LIB/probe.py" --active "$protocol"; then
+    error '启用后复检失败或超时。'; return 1
+  fi
+  printf '%s\n' "$protocol" >"$STATE/active" && chmod 0600 "$STATE/active" || return 1
+  armed=0
   if [[ $traffic == global ]]; then
     say "已启用 $protocol（TUN $mode · 全局代理）；保留 SSH 管理连接直连。"
   else
     say "已启用 $protocol（TUN $mode · 分流代理）；其他未命中规则的流量直连。"
   fi
   start_telegram_monitor "${5:-}"
-}
+)
 
 manual_enable() {
-  enable_profile "$1" "$(current_tun_mode)" "$(current_traffic_mode)" "$PROFILES/$1.json" defer || return 1
-  python3 "$LIB/node_manager.py" manual || return 1
-  start_telegram_monitor
+  require_install || return 1
+  python3 "$LIB/node_manager.py" connect-protocol "$1"
 }
 
 manual_disable() {
-  disable_proxy || return 1
-  python3 "$LIB/node_manager.py" manual
+  require_install || return 1
+  python3 "$LIB/node_manager.py" stop
 }
 
 toggle_tun() {
@@ -248,7 +276,12 @@ toggle_tun() {
   if [[ -s $STATE/active ]] && systemctl is-active --quiet sing-box.service; then
     protocol=$(cat "$STATE/active")
     say "正在将 TUN 切换为 $new_mode，并复检 $protocol 节点…"
-    enable_profile "$protocol" "$new_mode"
+    if enable_profile "$protocol" "$new_mode" "$(current_traffic_mode)" "$PROFILES/$protocol.json" defer; then
+      python3 "$LIB/node_manager.py" mode-ok "主菜单切换 TUN 为 $new_mode"
+    else
+      python3 "$LIB/node_manager.py" mode-failed 'TUN 切换失败，已保留原模式和连接'
+      return 1
+    fi
   else
     printf '%s\n' "$new_mode" >"$STATE/tun_mode"; chmod 0600 "$STATE/tun_mode"
     say "TUN 已设为 $new_mode；下次启用代理时生效。"
@@ -262,7 +295,12 @@ toggle_traffic_mode() {
   if [[ -s $STATE/active ]] && systemctl is-active --quiet sing-box.service; then
     protocol=$(cat "$STATE/active")
     say "正在切换到${label}模式，并复检 $protocol 节点…"
-    enable_profile "$protocol" "$(current_tun_mode)" "$new_mode"
+    if enable_profile "$protocol" "$(current_tun_mode)" "$new_mode" "$PROFILES/$protocol.json" defer; then
+      python3 "$LIB/node_manager.py" mode-ok "主菜单切换为${label}模式"
+    else
+      python3 "$LIB/node_manager.py" mode-failed '流量模式切换失败，已保留原模式和连接'
+      return 1
+    fi
   else
     printf '%s\n' "$new_mode" >"$STATE/traffic_mode"; chmod 0600 "$STATE/traffic_mode"
     say "已设为${label}模式；下次启用代理时生效。"
@@ -274,10 +312,11 @@ disable_proxy() {
   if [[ ${1:-} != keep-monitor ]]; then
     systemctl disable --now singbox-manager-telegram.timer 2>/dev/null || true
   fi
-  systemctl disable --now sing-box.service
+  timeout -k 3s 30s systemctl disable --now sing-box.service || return 1
   if command -v resolvectl >/dev/null; then resolvectl flush-caches 2>/dev/null || true; fi
   remove_file "$STATE/active"
   remove_file "$STATE/exit_ip"
+  remove_file "$STATE/probe-result.json"
   say '代理已关闭。'
 }
 
@@ -295,7 +334,7 @@ detect_proxy() {
   esac
   say "正在检测 $protocol 代理，请稍候…"
   remove_file "$STATE/exit_ip"
-  python3 "$LIB/probe.py" --active "$protocol"
+  timeout -k 3s 75s python3 "$LIB/probe.py" --active "$protocol"
 }
 
 uninstall_manager() {
@@ -304,6 +343,10 @@ uninstall_manager() {
   . "$STATE/original.state"
   systemctl disable --now singbox-manager-nodes.timer 2>/dev/null || true
   systemctl stop singbox-manager-nodes.service 2>/dev/null || true
+  systemctl disable --now singbox-manager-watch.timer 2>/dev/null || true
+  systemctl stop singbox-manager-watch.service 2>/dev/null || true
+  remove_file /etc/systemd/system/singbox-manager-watch.timer
+  remove_file /etc/systemd/system/singbox-manager-watch.service
   remove_file /etc/systemd/system/singbox-manager-nodes.timer
   remove_file /etc/systemd/system/singbox-manager-nodes.service
   systemctl disable --now singbox-manager-telegram.timer 2>/dev/null || true
@@ -381,11 +424,11 @@ show_menu() {
   printf '   %b03%b  编辑 Shadowsocks 节点\n' "$accent" "$reset"
   printf '   %b04%b  编辑 WireGuard 节点与 MTU\n' "$accent" "$reset"
   printf '   %b14%b  编辑 SOCKS5 代理节点\n' "$accent" "$reset"
-  printf '%b  ── 代理切换 ────────────────────────────────%b\n' "$dim" "$reset"
-  printf '   %b05%b  启用 HTTPS 代理\n' "$accent" "$reset"
-  printf '   %b06%b  启用 Shadowsocks 代理\n' "$accent" "$reset"
-  printf '   %b07%b  启用 WireGuard 代理\n' "$accent" "$reset"
-  printf '   %b15%b  启用 SOCKS5 代理\n' "$accent" "$reset"
+  printf '%b  ── 选择节点与连接 ──────────────────────────%b\n' "$dim" "$reset"
+  printf '   %b05%b  选择 / 连接 HTTPS 节点\n' "$accent" "$reset"
+  printf '   %b06%b  选择 / 连接 Shadowsocks 节点\n' "$accent" "$reset"
+  printf '   %b07%b  选择 / 连接 WireGuard 节点\n' "$accent" "$reset"
+  printf '   %b15%b  选择 / 连接 SOCKS5 节点\n' "$accent" "$reset"
   printf '   %b08%b  关闭代理\n' "$accent" "$reset"
   printf '   %b09%b  卸载并清除管理器配置\n' "$accent" "$reset"
   printf '%b  ── 诊断与退出 ──────────────────────────────%b\n' "$dim" "$reset"
@@ -413,6 +456,10 @@ main() {
     [[ $EUID -eq 0 ]] || return 1
     start_telegram_monitor defer
     return $?
+  elif [[ ${1:-} == --stop-node-monitor ]]; then
+    [[ $EUID -eq 0 ]] || return 1
+    timeout 10s systemctl disable --now singbox-manager-telegram.timer
+    return $?
   fi
   check_host
   while :; do
@@ -420,20 +467,20 @@ main() {
     read -r -p '请选择功能 [1-17] › ' choice
     case "$choice" in
       1) locked_action install_manager || true ;;
-      2) locked_action edit_profile https || true ;;
-      3) locked_action edit_profile shadowsocks || true ;;
-      4) locked_action edit_profile wg || true ;;
-      5) locked_action manual_enable https || true ;;
-      6) locked_action manual_enable shadowsocks || true ;;
-      7) locked_action manual_enable wg || true ;;
-      8) locked_action manual_disable || true ;;
+      2) edit_profile https || true ;;
+      3) edit_profile shadowsocks || true ;;
+      4) edit_profile wg || true ;;
+      5) manual_enable https || true ;;
+      6) manual_enable shadowsocks || true ;;
+      7) manual_enable wg || true ;;
+      8) manual_disable || true ;;
       9) locked_action uninstall_manager || true ;;
       10) locked_action detect_proxy || true ;;
       11) locked_action toggle_tun || true ;;
       12) locked_action configure_telegram || true ;;
       13) say '已退出。'; return 0 ;;
-      14) locked_action edit_profile socks5 || true ;;
-      15) locked_action manual_enable socks5 || true ;;
+      14) edit_profile socks5 || true ;;
+      15) manual_enable socks5 || true ;;
       16) locked_action toggle_traffic_mode || true ;;
       17) if require_install; then python3 "$LIB/node_manager.py" menu || true; fi ;;
       *) error '请输入 1–17。' ;;
