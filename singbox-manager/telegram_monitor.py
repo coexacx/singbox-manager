@@ -15,19 +15,16 @@ import sys
 import tempfile
 import time
 from urllib.parse import urlencode
-from deadline import deadline
-import probe_policy as policy
 
 CONFIG = pathlib.Path("/etc/sing-box/manager/telegram.json")
 SINGBOX_CONFIG = pathlib.Path("/etc/sing-box/config.json")
 TOKEN_RE = re.compile(r"^[0-9]{5,}:[A-Za-z0-9_-]{20,}$")
 USERNAME_RE = re.compile(r"^@[A-Za-z][A-Za-z0-9_]{4,31}$")
 from ip_lookup import lookup_proxy_ip
-from node_notifications import event_lines, summary_lines, split_message
 
 
 def command(*args):
-    return subprocess.run(args, capture_output=True, text=True, check=False, timeout=5)
+    return subprocess.run(args, capture_output=True, text=True, check=False)
 
 
 def physical_interface():
@@ -95,11 +92,6 @@ class DirectHTTPSConnection(http.client.HTTPSConnection):
 
 
 def bot_api(token, method, payload=None):
-    with deadline(20):
-        return _bot_api(token, method, payload)
-
-
-def _bot_api(token, method, payload=None):
     body = urlencode(payload or {}).encode()
     connection = DirectHTTPSConnection("api.telegram.org", timeout=18, context=ssl.create_default_context())
     try:
@@ -204,19 +196,10 @@ def configured():
 
 
 def proxy_info():
-    key, cached = policy.active_info()
-    if cached.get('ip') and 0 <= time.time()-cached.get('ip_at', 0) < 1800:
-        return dict(cached, cached=True)
     try:
-        with policy.operation('metadata'):
-            info = lookup_proxy_ip(18081, rounds=1, timeout=15)
-        if key:
-            policy.cache_put(key, info, health=False)
-        return info
-    except (RuntimeError, OSError):
-        if cached.get('ip'):
-            return dict(cached, cached=True)
-        raise ValueError('出口信息暂不可用或本机检测已延后；不据此判定代理失效')
+        return lookup_proxy_ip(18081)
+    except RuntimeError as exc:
+        raise ValueError(str(exc)) from exc
 
 
 def service_snapshot():
@@ -245,88 +228,29 @@ def service_snapshot():
     return active, version, server_ip, protocol, tun, traffic
 
 
-def load_summary():
-    try:
-        result = json.loads((CONFIG.parent / "node-summary.json").read_text())
-        return result if isinstance(result, dict) and result.get("version") == 1 else None
-    except (OSError, ValueError):
-        return None
-
-
-def abnormal_events(events):
-    kinds = {'connect_failed', 'stop_failed', 'mode_failed', 'all_unavailable',
-             'direct_fallback', 'direct_restore_failed', 'failover', 'probe_deferred'}
-    return any(e.get('kind') in kinds or e.get('failed') or
-               (e.get('kind') == 'deleted' and e.get('reason') != '用户手动删除')
-               for e in (events or []))
-
-
-def pin_alert(data, message_id):
-    """A pin failure must never turn an already delivered alert into a resend."""
-    if not message_id:
-        return False
-    try:
-        with deadline(5):
-            bot_api(data['token'], 'pinChatMessage', {'chat_id': data['chat_id'],
-                    'message_id': message_id, 'disable_notification': 'false'})
-        print(f'Telegram 异常告警已置顶：消息 ID {message_id}', flush=True)
-        return True
-    except (ValueError, OSError, TimeoutError) as exc:
-        # Telegram descriptions are useful for missing rights, but may contain
-        # supplied values. Never print the configured token in any error path.
-        detail = str(exc).replace(str(data.get('token', '')), '[已隐藏]')[:180]
-        print(f'Telegram 告警已送达，但置顶失败：{detail}；请检查 Bot 置顶权限或网络。', flush=True)
-        return False
-
-
-def notify(event="periodic", snapshot=None, events=None):
+def notify(event="periodic"):
     data = load_config()
     if not configured():
         raise ValueError("尚未填写有效 Bot Token 与 chat_id")
     active, version, server_ip, protocol, tun, traffic = service_snapshot()
     status = "正常" if active == "active" else f"异常（{active or '未知'}）"
-    snapshot = snapshot if snapshot is not None else load_summary()
-    special = events is not None
-    selected = next((node for node in (snapshot or {}).get("nodes", [])
-                     if node.get("id") == (snapshot or {}).get("active_id")), None)
     try:
-        if special:
-            # Fault alerts must not wait for an unresponsive proxy or IP provider.
-            info = {"ip": selected["ip"], "city": selected.get("location_zh")} if selected and selected.get("ip") else None
-        else:
-            info = proxy_info() if active == "active" else None
+        info = proxy_info() if active == "active" else None
         problem = None
     except ValueError as exc:
         info = None
         problem = str(exc)
-        status = "内核运行中；出口信息暂不可用" if active == "active" else status
-    unavailable = bool((snapshot or {}).get("all_unavailable"))
-    if unavailable:
-        status = "异常（节点库无可用节点）"
-    elif special:
-        status = "事件通知；内核" + ("运行中" if active == "active" else "未运行")
-    warning = unavailable or active != "active" or (not special and not info) or abnormal_events(events)
-    if (snapshot or {}).get('direct_restored') and active != 'active':
-        status = '全部节点失效，sing-box 已停止，已恢复直连'
-        protocol, tun, traffic = '未启用', '关闭', '直连'
-        info = None
-    elif (snapshot or {}).get('direct_restore_pending'):
-        status = '全部节点失效，恢复直连未完成，正在重试清理'
-    stopped = bool(events and events[-1].get("kind") == "stopped" and active != "active")
-    if stopped:
-        status = "代理已手动关闭"
+        status = "异常（代理出口检测失败）"
     lines = [
-        f"{'⚪' if stopped else '🔴' if warning else '🟢'} sing-box 监测：{status}",
+        f"{'🟢' if info else '🔴'} sing-box 监测：{status}",
         f"服务器：{socket.gethostname()}",
         f"本机 IP：{server_ip}",
         f"内核版本：{version}",
         f"代理协议：{protocol} ｜ TUN：{tun}",
         f"流量模式：{traffic}",
-        f"代理出口 IP{'（最近检测）' if special or (info and info.get('cached')) else ''}：{info['ip'] if info else '不可用'}",
+        f"代理出口 IP：{info['ip'] if info else '不可用'}",
     ]
     if info:
-        if info.get('cached') and info.get('ip_at'):
-            lines.append('出口信息采样：' + time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(info['ip_at'])))
         place = " / ".join(str(info.get(key, "")).strip() for key in ("city", "region", "country") if info.get(key))
         lines.append(f"IP 地理位置：{place or '未知'}")
         if info.get("org"):
@@ -336,27 +260,11 @@ def notify(event="periodic", snapshot=None, events=None):
     lines.append(f"时间：{time.strftime('%Y-%m-%d %H:%M:%S %Z')}")
     if event == "started":
         lines.insert(1, "事件：代理已启用")
-    lines[1:1] = event_lines(events)
-    lines.extend(summary_lines(snapshot))
-    chunks = split_message("\n".join(lines))
-    message_ids = []
-    for index, chunk in enumerate(chunks, 1):
-        if index > 1:
-            time.sleep(1)
-        prefix = f"[{index}/{len(chunks)}] " if len(chunks) > 1 else ""
-        result = bot_api(data["token"], "sendMessage", {"chat_id": data["chat_id"], "text": prefix + chunk})
-        message_ids.append(result.get("message_id"))
-    if warning and not stopped and message_ids:
-        # Pin the first part containing the incident summary, not a continuation
-        # containing only inventory rows. Existing pins are left untouched.
-        pin_alert(data, message_ids[0])
-    print(f"Telegram 通知已发送：{status}；消息 ID {','.join(map(str, message_ids))}", flush=True)
-    return message_ids
+    bot_api(data["token"], "sendMessage", {"chat_id": data["chat_id"], "text": "\n".join(lines)})
+    print(f"Telegram 通知已发送：{status}；出口 IP {info['ip'] if info else '不可用'}")
 
 
 if __name__ == "__main__":
-    from utf8_runtime import ensure_utf8
-    ensure_utf8()
     try:
         if len(sys.argv) == 2 and sys.argv[1] == "setup":
             setup()

@@ -44,10 +44,10 @@ def has_ipv6_default():
             ["ip", "-6", "route", "show", "default"],
             capture_output=True,
             text=True,
-            check=True, timeout=5,
+            check=True,
         )
         return bool(result.stdout.strip())
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.CalledProcessError):
         return False
 
 
@@ -63,7 +63,7 @@ def ssh_peer_routes():
     try:
         result = subprocess.run(
             ["ss", "-Htnp", "state", "established"],
-            capture_output=True, text=True, check=True, timeout=5,
+            capture_output=True, text=True, check=True,
         )
         for line in result.stdout.splitlines():
             if '"sshd' not in line and '"dropbear"' not in line:
@@ -72,7 +72,7 @@ def ssh_peer_routes():
             if len(columns) >= 4:
                 host = columns[3].rsplit(":", 1)[0].strip("[]")
                 peers.add(host)
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.CalledProcessError):
         pass
     routes = []
     for peer in sorted(peers):
@@ -92,7 +92,7 @@ def ssh_server_ports():
         ports.add(int(connection[3]))
     try:
         result = subprocess.run(
-            ["ss", "-Hltnp"], capture_output=True, text=True, check=True, timeout=5,
+            ["ss", "-Hltnp"], capture_output=True, text=True, check=True,
         )
         for line in result.stdout.splitlines():
             if '"sshd"' not in line and '"dropbear"' not in line:
@@ -102,7 +102,7 @@ def ssh_server_ports():
                 raw = columns[3].rsplit(":", 1)[-1]
                 if raw.isdigit():
                     ports.add(int(raw))
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.CalledProcessError):
         pass
     return sorted(port for port in ports if 1 <= port <= 65535)
 
@@ -176,14 +176,8 @@ def render(node, template, tun_mode="on", traffic_mode="split"):
         outbound = config["outbounds"][0]
         outbound["server"] = value(node, "server")
         outbound["server_port"] = port(node, "server_port")
-        username, password = node.get("username", ""), node.get("password", "")
-        if bool(username) != bool(password):
-            fail("HTTPS 用户名和密码必须同时填写或同时留空")
-        for key in ("username", "password"):
-            if node.get(key):
-                outbound[key] = value(node, key)
-            else:
-                outbound.pop(key, None)
+        outbound["username"] = value(node, "username")
+        outbound["password"] = value(node, "password")
         outbound["tls"]["server_name"] = value(node, "tls_server_name")
     elif protocol == "shadowsocks":
         outbound = config["outbounds"][0]
@@ -223,32 +217,18 @@ def render(node, template, tun_mode="on", traffic_mode="split"):
     else:
         endpoint = config["endpoints"][0]
         peer = endpoint["peers"][0]
-        mtu = node.get("mtu", 1280)
+        mtu = node.get("mtu")
         if not isinstance(mtu, int) or isinstance(mtu, bool) or not 576 <= mtu <= 9000:
             fail("启用 WireGuard 前必须填写 576–9000 的 MTU")
         endpoint["mtu"] = mtu
-        addresses = node.get("local_address", [])
-        if isinstance(addresses, str):
-            addresses = [item.strip() for item in addresses.split(",")]
-        if not isinstance(addresses, list) or not addresses:
-            fail("请填写本地地址/CIDR")
-        endpoint["address"] = [str(ipaddress.ip_interface(item)) for item in addresses]
+        local_address = value(node, "local_address")
+        ipaddress.ip_interface(local_address)
+        endpoint["address"] = [local_address]
         endpoint["private_key"] = wg_key(node, "private_key")
         peer["address"] = value(node, "peer_address")
         peer["port"] = port(node, "peer_port")
         peer["public_key"] = wg_key(node, "peer_public_key")
-        if node.get("pre_shared_key"):
-            peer["pre_shared_key"] = wg_key(node, "pre_shared_key")
-        if "allowed_ips" in node:
-            peer["allowed_ips"] = [str(ipaddress.ip_network(item, strict=False)) for item in node["allowed_ips"]]
-            if not peer["allowed_ips"]:
-                fail("allowed_ips 不能为空")
-        if "persistent_keepalive" in node:
-            keepalive = node["persistent_keepalive"]
-            if not isinstance(keepalive, int) or isinstance(keepalive, bool) or not 0 <= keepalive <= 65535:
-                fail("persistent_keepalive 必须是 0–65535 的整数")
-            peer["persistent_keepalive_interval"] = keepalive
-        primary_dns = node.get("dns_server") or "1.1.1.1"
+        primary_dns = value(node, "dns_server")
         ipaddress.ip_address(primary_dns)
         # The source template's local DNS can recurse after TUN takes the default route.
         for server in config["dns"]["servers"]:
@@ -319,8 +299,6 @@ def main():
 
 
 if __name__ == "__main__":
-    from utf8_runtime import ensure_utf8
-    ensure_utf8()
     try:
         main()
     except (ValueError, KeyError, OSError, json.JSONDecodeError) as exc:

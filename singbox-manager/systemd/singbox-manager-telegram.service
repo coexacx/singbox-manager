@@ -5,9 +5,8 @@ After=network-online.target
 
 [Service]
 Type=oneshot
-Environment=PYTHONUTF8=1 PYTHONIOENCODING=utf-8
 User=sing-box
 AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW
 CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW
 ExecStart=/usr/bin/python3 /usr/local/lib/singbox-manager/telegram_monitor.py notify
-TimeoutStartSec=300
+TimeoutStartSec=120
