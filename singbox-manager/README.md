@@ -24,11 +24,32 @@ Telegram 配置保存在 `/etc/sing-box/manager/telegram.json`，只有 root 与
 
 节点资料仅 root 可读，位置为 `/etc/sing-box/manager/https.json`、`shadowsocks.json`、`wg.json`、`socks5.json`。当前启用的完整配置为 `/etc/sing-box/config.json`。查看状态和日志：
 
-运行中的 sing-box 会在 `127.0.0.1:18081` 提供仅本机可访问的 SOCKS 检测入口；菜单在切换后和手动检测时通过此入口依次查询三个独立的 IP 服务。
-
 ```bash
 systemctl status sing-box.service
-journalctl -u sing-box.service -e
+journalctl -u sing-box.service -n 100 --no-pager
+sing-box version
 ```
+
+打开菜单并停止代理：
+
+```bash
+bash /root/singbox.sh
+# 在菜单中选择 8
+```
+
+菜单 8 会停用 sing-box 和 Telegram 定时监测。只运行 `systemctl stop sing-box.service` 会停止内核进程，但不会更新菜单状态或关闭 Telegram 定时器。仍运行多节点版的现有服务器可以执行：
+
+```bash
+python3 /usr/local/lib/singbox-manager/node_manager.py stop
+```
+
+该命令会关闭代理和自动故障切换，仅适用于装有多节点管理器的服务器。查看 Telegram 定时监测和日志：
+
+```bash
+systemctl status singbox-manager-telegram.timer
+journalctl -u singbox-manager-telegram.service -n 50 --no-pager
+```
+
+运行中的 sing-box 会在 `127.0.0.1:18081` 提供仅本机可访问的 SOCKS 检测入口；菜单在切换后和手动检测时通过此入口依次查询三个独立的 IP 服务。
 
 默认直连 DNS 为 `1.1.1.1`，可在对应节点资料中修改。WireGuard 默认隧道 DNS 是原模板中的 Surfshark 地址；使用其他提供商时请在菜单 4 修改。分流规则来自原始三个模板，目标站点走选定节点，其他流量直连。程序自带加密 DNS 或隐藏域名时，匹配取决于 IP 规则与协议嗅探。

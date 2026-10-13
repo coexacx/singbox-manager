@@ -16,6 +16,26 @@ bash <(curl -fsSL https://raw.githubusercontent.com/coexacx/singbox-manager/main
 
 菜单功能、节点字段和运行机制详见 [使用说明](singbox-manager/README.md)。仓库只包含空白节点模板；节点资料和 Telegram 配置保存在部署服务器的 `/etc/sing-box/manager/` 中。
 
+## 常用命令
+
+```bash
+# 打开管理菜单
+bash /root/singbox.sh
+
+# 查看 sing-box 状态和最近 100 条日志
+systemctl status sing-box.service
+journalctl -u sing-box.service -n 100 --no-pager
+
+# 查看 sing-box 版本
+sing-box version
+
+# 查看 Telegram 定时器状态和最近通知日志
+systemctl status singbox-manager-telegram.timer
+journalctl -u singbox-manager-telegram.service -n 50 --no-pager
+```
+
+停止代理优先打开管理菜单并选择 **8**，这样会同时更新管理器状态并停止 Telegram 定时监测。仍运行多节点版本的现有服务器，可用 `python3 /usr/local/lib/singbox-manager/node_manager.py stop` 停止代理和自动故障切换；此命令不适用于本仓库回退后的单节点版本。启用代理请使用菜单中对应协议的启用项，以便执行节点检查。
+
 ## 仓库结构
 
 - `singbox.sh`：菜单入口与安装器。
